@@ -10,9 +10,11 @@ before any state-changing action.
 
 ## Status
 
-Week 0 — walking skeleton. Built: `uv` project, FastAPI app (`/health`, `/`, `/api/demo`),
-`Dockerfile`, config + thin LLM wrapper, health tests. Not built: RAG, sim, agent loop,
-triage, guardrails, evals, dashboard, DB. Do not assume a module exists; check.
+Week 0 done — skeleton deployed to Render (https://runbook-cgkn.onrender.com), live model
+call verified in prod. Built: `uv` project, FastAPI (`/health`, `/`, `/api/demo`),
+`Dockerfile`, config + thin LLM wrapper, health tests, git-push-to-deploy.
+Not built: RAG, sim, agent loop, triage, guardrails, evals, dashboard, DB. Check before
+assuming a module exists.
 
 ## Golden rules
 
