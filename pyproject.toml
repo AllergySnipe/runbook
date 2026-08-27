@@ -9,7 +9,11 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "anthropic>=1.0",
     "pydantic-settings>=2.6",
+    "psycopg[binary]>=3.2",
 ]
+
+[project.scripts]
+runbook = "runbook.cli:main"
 
 [dependency-groups]
 dev = [
