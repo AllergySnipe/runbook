@@ -19,6 +19,12 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str
 
+    # Postgres (Neon). `database_url` is the pooled connection (PgBouncer) — used by
+    # the app at runtime. `database_url_unpooled` is the direct connection — used by
+    # the migration applier, which needs session-level features the pooler drops.
+    database_url: str
+    database_url_unpooled: str
+
     # Model routing: a cheap model for triage / classification, a capable model
     # for diagnosis / synthesis.
     triage_model: str = "claude-haiku-4-5"

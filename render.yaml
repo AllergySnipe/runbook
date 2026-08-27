@@ -16,4 +16,8 @@ services:
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
-      # DATABASE_URL (Neon) is added here in Week 1, when the DB is actually wired.
+      # Neon Postgres. Pooled URL for the app, direct (unpooled) for migrations.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
