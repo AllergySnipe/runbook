@@ -1,0 +1,19 @@
+# Render Blueprint — infrastructure as code for the deploy target.
+# https://render.com/docs/blueprint-spec
+#
+# Connect this repo in the Render dashboard once; thereafter every push to `main`
+# redeploys. Secrets (ANTHROPIC_API_KEY, DATABASE_URL) are set in the dashboard,
+# NOT here — `sync: false` means "prompt me, don't store in git".
+
+services:
+  - type: web
+    name: runbook
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # DATABASE_URL (Neon) is added here in Week 1, when the DB is actually wired.

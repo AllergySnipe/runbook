@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Frontend (added Week 2)
+web/node_modules/
+web/dist/
+
+# OS
+.DS_Store
