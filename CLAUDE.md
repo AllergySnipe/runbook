@@ -10,22 +10,20 @@ before any state-changing action.
 
 ## Status
 
-Week 0 done — skeleton deployed to Render (https://runbook-cgkn.onrender.com), live model
-call verified in prod. Built: `uv` project, FastAPI (`/health`, `/`, `/api/demo`),
-`Dockerfile`, config + thin LLM wrapper, health tests, git-push-to-deploy.
+Week 0 done — FastAPI skeleton (`/health`, `/`, `/api/demo`), Docker, deployed to Render
+(https://runbook-cgkn.onrender.com), git-push-to-deploy.
 
-Week 1 in progress:
-- **DB wired** — Neon Postgres linked (`.neon`), `config.py` has pooled + unpooled URLs.
-- **Migrations** — `migrations/*.sql` + `runbook migrate`; `0001` = pgvector + `documents`.
-- **Corpus ingested** — `runbook ingest` fetches synthetic paymentsvc runbooks + Scoutflo
-  SRE playbooks + techlearn runbooks → chunked into `documents` (~2100 rows). danluu
-  postmortems source exists but is opt-in (`--source postmortems`) — external links are
-  slow/flaky; skipped for now.
-- **Embeddings** — `embed.py` (local `fastembed` / BGE-small, 384-dim; ADR-0002),
-  `runbook embed` backfills `documents.embedding`; `0002` migration = `vector(384)` + HNSW.
+Week 1 — corpus + embeddings **done and verified against Neon**:
+- DB: Neon Postgres linked (`.neon`), `config.py` pooled + unpooled URLs. Migrations:
+  `migrations/*.sql` + `runbook migrate` (`0001` documents + pgvector, `0002` `vector(384)` + HNSW).
+- Corpus: `src/runbook/ingest/` (`sources.py`, `chunk.py`) + `runbook ingest` → 2102 chunks
+  in `documents` (synthetic paymentsvc runbooks + Scoutflo SRE + techlearn). Postmortems
+  source built but opt-in (`--source postmortems`) — flaky external links, skipped.
+- Embeddings: `src/runbook/embed.py` (local `fastembed`/BGE-small 384-dim; ADR-0002) +
+  `runbook embed` — all 2102 rows embedded; vector search sanity-checked.
 
-Not built: retrieval (hybrid search + rerank), sim, tools, agent loop, triage, guardrails,
-evals, dashboard. Check before assuming a module exists.
+Not started: retrieval (hybrid vector + full-text + rerank), sim, tools, agent loop, triage,
+guardrails, evals, dashboard. Check before assuming a module exists.
 
 ## Golden rules
 
