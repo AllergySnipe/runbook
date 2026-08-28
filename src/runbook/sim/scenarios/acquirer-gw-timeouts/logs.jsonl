@@ -1,0 +1,6 @@
+{"at": "T+0m", "level": "ERROR", "count": 40, "every_s": 35, "message": "acquirer-gw request failed: deadline exceeded (5000ms) route=primary op=authorize"}
+{"at": "T+1m", "level": "WARN", "count": 22, "every_s": 55, "message": "acquirer-gw slow response 4210ms route=primary; retrying (attempt 2/3)"}
+{"at": "T+2m", "level": "ERROR", "count": 14, "every_s": 90, "message": "POST /charges 504 upstream_timeout acquirer-gw"}
+{"at": "T+4m", "level": "WARN", "count": 8, "every_s": 120, "message": "acquirer-gw client circuit breaker: half-open -> open (error ratio 0.58)"}
+{"at": "T+6m", "level": "INFO", "message": "retry budget exhausted for acquirer-gw; shedding retries"}
+{"at": "T+30m", "level": "INFO", "message": "acquirer-gw latency recovering; circuit breaker closing"}

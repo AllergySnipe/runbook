@@ -1,0 +1,18 @@
+name: healthy
+service: paymentsvc
+title: "paymentsvc — steady state, no incident"
+severity: ""
+alert: ""
+anchor: 2026-08-28T12:00:00Z
+incident_window: ["T-20m", "T+20m"]
+expected_runbook: null
+
+summary: >
+  Nominal operation. Every signal is flat within normal jitter, no dependency is
+  degraded, and the only recent deploy landed 3 hours ago without incident. Used
+  as the "nothing is wrong here" world so triage and the agent don't hallucinate
+  a root cause against a healthy service.
+
+noise:
+  seed: 3
+  lines_per_min: 8

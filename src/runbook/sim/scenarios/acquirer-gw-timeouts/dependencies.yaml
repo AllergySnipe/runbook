@@ -1,0 +1,24 @@
+service: paymentsvc
+
+upstreams:
+  - name: postgres-primary
+    kind: database
+    health: healthy
+  - name: redis-idempotency
+    kind: cache
+    health: healthy
+  - name: acquirer-gw
+    kind: external_api
+    health: degraded
+    status_url: "https://status.acquirer-gw.example"
+    note: "vendor status page: 'partial outage — elevated latency on authorization API' since 09:12 UTC"
+
+downstreams:
+  - name: payments-events
+    kind: queue
+    health: healthy
+  - name: ledger
+    kind: service
+    health: healthy
+
+neighbours: [checkout-web, fraud-scoring, notification-svc]

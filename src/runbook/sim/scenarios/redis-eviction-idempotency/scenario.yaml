@@ -1,0 +1,20 @@
+name: redis-eviction-idempotency
+service: paymentsvc
+title: "paymentsvc idempotency miss rate high — Redis eviction / double-charge risk"
+severity: SEV1
+alert: PaymentsvcIdempotencyMissRateHigh
+anchor: 2026-08-28T20:05:00Z
+incident_window: ["T-15m", "T+40m"]
+expected_runbook: redis-eviction-idempotency.md
+
+summary: >
+  Idempotency-key lookups are returning MISS at ~4% for keys that should be hits.
+  Redis used_memory is at 0.99 of maxmemory and evicted_keys is climbing —
+  maxmemory-policy allkeys-lru is evicting idempotency keys before their TTL. A
+  paymentsvc deploy at T-40m added per-merchant rate-limit counters in the same
+  Redis keyspace, growing its footprint. Duplicate charge rows are appearing —
+  money-correctness bug, treat as SEV1.
+
+noise:
+  seed: 59
+  lines_per_min: 7

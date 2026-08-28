@@ -1,0 +1,24 @@
+service: paymentsvc
+
+upstreams:
+  - name: postgres-primary
+    kind: database
+    health: degraded
+    note: "AccessExclusiveLock on `charges` held by pid 18234 (migration 0043); 41 backends waiting, wait_event_type=Lock; DB CPU ~12%"
+  - name: redis-idempotency
+    kind: cache
+    health: healthy
+  - name: acquirer-gw
+    kind: external_api
+    health: healthy
+    status_url: "https://status.acquirer-gw.example"
+
+downstreams:
+  - name: payments-events
+    kind: queue
+    health: healthy
+  - name: ledger
+    kind: service
+    health: healthy
+
+neighbours: [checkout-web, fraud-scoring, notification-svc]

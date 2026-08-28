@@ -1,0 +1,7 @@
+{"at": "T-1m", "level": "INFO", "message": "migration runner: applying 0043_alter_charges_add_region"}
+{"at": "T-1m", "level": "INFO", "message": "0043: ALTER TABLE charges ADD COLUMN region text NOT NULL DEFAULT 'us'"}
+{"at": "T+2m", "level": "ERROR", "count": 35, "every_s": 30, "message": "canceling statement due to lock timeout on relation \"charges\""}
+{"at": "T+3m", "level": "ERROR", "count": 10, "every_s": 75, "message": "deadlock detected: process holding AccessExclusiveLock on charges"}
+{"at": "T+4m", "level": "WARN", "count": 12, "every_s": 60, "message": "POST /charges timed out after 10000ms waiting for db (wait_event=Lock)"}
+{"at": "T+5m", "level": "INFO", "message": "pg_blocking_pids: [18234] head-of-line blocker running ALTER TABLE charges"}
+{"at": "T+18m", "level": "INFO", "message": "operator: pg_terminate_backend(18234); lock released, queue draining"}

@@ -1,0 +1,12 @@
+# No paymentsvc deploy. A *neighbour* workload scaled up.
+- at: "T-3d"
+  service: paymentsvc
+  version: "2026.8.25-1f0b7a2"
+  migration: false
+  change: "add p99 latency histogram buckets"
+
+- at: "T-20m"
+  service: batch-reconciler
+  version: "2026.8.28-recon-4d21"
+  migration: false
+  change: "increase settlement worker parallelism 4 -> 16 (same node pool as paymentsvc)"

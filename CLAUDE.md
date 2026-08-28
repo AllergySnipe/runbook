@@ -13,17 +13,29 @@ before any state-changing action.
 Week 0 done — FastAPI skeleton (`/health`, `/`, `/api/demo`), Docker, deployed to Render
 (https://runbook-cgkn.onrender.com), git-push-to-deploy.
 
-Week 1 — corpus + embeddings **done and verified against Neon**:
-- DB: Neon Postgres linked (`.neon`), `config.py` pooled + unpooled URLs. Migrations:
-  `migrations/*.sql` + `runbook migrate` (`0001` documents + pgvector, `0002` `vector(384)` + HNSW).
-- Corpus: `src/runbook/ingest/` (`sources.py`, `chunk.py`) + `runbook ingest` → 2102 chunks
-  in `documents` (synthetic paymentsvc runbooks + Scoutflo SRE + techlearn). Postmortems
-  source built but opt-in (`--source postmortems`) — flaky external links, skipped.
-- Embeddings: `src/runbook/embed.py` (local `fastembed`/BGE-small 384-dim; ADR-0002) +
-  `runbook embed` — all 2102 rows embedded; vector search sanity-checked.
+Week 1 — corpus + embeddings + **retrieval done, verified against Neon**:
+- DB: Neon linked (`.neon`), pooled + unpooled URLs. Migrations `migrations/*.sql` +
+  `runbook migrate` — `0001` documents + pgvector, `0002` `vector(384)` + HNSW,
+  `0003` `chunk_tsv` generated tsvector + GIN.
+- Corpus: `src/runbook/ingest/` + `runbook ingest` → 2102 chunks (synthetic paymentsvc +
+  Scoutflo SRE + techlearn). Postmortems opt-in (`--source postmortems`), skipped.
+- Embeddings: `src/runbook/embed.py` (local fastembed/BGE-small 384-dim; ADR-0002) +
+  `runbook embed` — all rows embedded.
+- Retrieval: `src/runbook/rag/` (`retrieve.py` = pgvector ∥ Postgres FTS → RRF →
+  cross-encoder rerank; `rerank.py`) + `runbook search`. ADR-0003. hit@3 = 6/6 on the
+  synthetic failure modes. Docker bakes both models (offline at runtime).
+- Sim + tools (ADR-0004): `src/runbook/sim/` = fixture-backed fake environment.
+  7 scenarios (`scenarios/<name>/` — 6 failure modes + `healthy`), each a manifest +
+  compact metric specs + hand-written signal `logs.jsonl` + deploys + dependency graph;
+  deterministic series expansion, per-scenario payments-domain noise generator (no real
+  log dataset). `src/runbook/tools.py` = the four **read-only** tools (`query_metrics`,
+  `search_logs`, `get_recent_deploys`, `get_service_dependencies`) + a `TOOLS` allowlist
+  (S2 groundwork). `runbook sim <action> <scenario>` inspects it by hand. Each scenario
+  has a runbook-linkage test that runs its Diagnosis steps and asserts they land.
 
-Not started: retrieval (hybrid vector + full-text + rerank), sim, tools, agent loop, triage,
-guardrails, evals, dashboard. Check before assuming a module exists.
+Not started: agent loop, triage, guardrails, evals, dashboard. `retrieve()` is sync (async
+wrapper deferred to the tool-loop slice). Tools are plain functions — Anthropic tool schemas
++ the loop come next. Check before assuming a module exists.
 
 ## Golden rules
 
@@ -65,11 +77,12 @@ corpus/synthetic/  hand-written paymentsvc runbooks (committed; part of the corp
 data/raw/          ingest cache — fetched tarballs + postmortem text (gitignored)
 src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db.py,
                    cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
-                   rag/ (hybrid retrieve + rerank)
+                   rag/ (hybrid retrieve + rerank), sim/ (fixture env + scenarios/),
+                   tools.py (read-only investigation tools + allowlist)
 tests/             deterministic pytest tests (no model calls, no secrets, no DB)
 Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
-(coming: core/ orchestration, sim/, evals/, prompts/, web/)
+(coming: core/ orchestration, evals/, prompts/, web/)
 ```
 
 ## Commands
@@ -80,6 +93,7 @@ uv run pytest                                         deterministic tests
 uv run ruff check . && uv run ruff format .           lint + format
 uv run uvicorn runbook.app:app --reload --port 8000   local server
 uv run runbook search "<alert text>" [-k N] [--mode]   hybrid retrieval over the corpus
+uv run runbook sim <action> <scenario> [...]           inspect the sim (list|show|metrics|logs|deploys|deps)
 # coming: uv run runbook diagnose <scenario>, uv run evals
 ```
 

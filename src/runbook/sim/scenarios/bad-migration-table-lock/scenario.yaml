@@ -1,0 +1,19 @@
+name: bad-migration-table-lock
+service: paymentsvc
+title: "paymentsvc availability low — bad migration locking the charges table"
+severity: SEV1
+alert: PaymentsvcAvailabilityLow
+anchor: 2026-08-28T16:40:00Z
+incident_window: ["T-8m", "T+25m"]
+expected_runbook: bad-migration-table-lock.md
+
+summary: >
+  Success rate on POST /charges collapsed to ~40% two minutes after a deploy at
+  T-1m that shipped migration 0043 — an ALTER TABLE charges that rewrites the
+  table and holds AccessExclusiveLock. 41 backends are queued on Lock; Postgres
+  CPU is low because everything is waiting, not working. Nearly all requests
+  affected, not a subset.
+
+noise:
+  seed: 23
+  lines_per_min: 5

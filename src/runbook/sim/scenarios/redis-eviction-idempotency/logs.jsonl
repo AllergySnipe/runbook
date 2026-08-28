@@ -1,0 +1,6 @@
+{"at": "T-40m", "level": "INFO", "message": "deploy 2026.8.28-c93a7f1 applied: per-merchant rate-limit counters in Redis"}
+{"at": "T-6m", "level": "WARN", "count": 26, "every_s": 45, "message": "idempotency lookup MISS for key last seen 3h ago key=idem:8f21c0a4 merchant=m_5567"}
+{"at": "T-5m", "level": "WARN", "count": 18, "every_s": 55, "message": "idempotency check fail-open: processing charge without idempotency guarantee (redis miss)"}
+{"at": "T-3m", "level": "ERROR", "count": 13, "every_s": 80, "message": "duplicate charge detected: (merchant=m_5567, idempotency_key=idem:8f21c0a4) has 2 rows in charges"}
+{"at": "T-1m", "level": "WARN", "count": 6, "every_s": 120, "message": "redis: connection reset by peer during GET idem:*; retrying"}
+{"at": "T+27m", "level": "INFO", "message": "redis maxmemory raised 4GB -> 8GB; evictions stopped; idempotency miss ratio recovering"}

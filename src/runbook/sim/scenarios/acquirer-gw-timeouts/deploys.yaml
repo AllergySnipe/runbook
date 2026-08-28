@@ -1,0 +1,12 @@
+# No paymentsvc deploy near onset — the change is upstream (rules out cause 3).
+- at: "T-2d"
+  service: paymentsvc
+  version: "2026.8.26-77aa10b"
+  migration: false
+  change: "bump SDK deps; add request-id log field"
+
+- at: "T-5h"
+  service: checkout-web
+  version: "2026.8.28-web-31c9"
+  migration: false
+  change: "checkout UI copy tweaks"

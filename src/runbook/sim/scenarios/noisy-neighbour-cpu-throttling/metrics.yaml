@@ -1,0 +1,68 @@
+- name: container_cpu_cfs_throttled_ratio
+  unit: ratio
+  baseline: 0.04
+  jitter: 0.01
+  ceil: 1.0
+  segments:
+    - {at: "T-8m", to: 0.35, shape: ramp, over: "6m"}    # crosses the 25% alert threshold
+    - {at: "T+34m", to: 0.04, shape: step}
+
+- name: container_cpu_usage_ratio          # usage / limit — only *moderate*
+  unit: ratio
+  baseline: 0.44
+  jitter: 0.03
+  ceil: 1.0
+  segments:
+    - {at: "T-8m", to: 0.66, shape: ramp, over: "6m"}
+    - {at: "T+34m", to: 0.44, shape: step}
+
+- name: node_cpu_usage_ratio               # the node itself is saturated
+  unit: ratio
+  baseline: 0.55
+  jitter: 0.03
+  ceil: 1.0
+  segments:
+    - {at: "T-20m", to: 0.92, shape: ramp, over: "8m"}   # the neighbour scaled up here
+    - {at: "T+34m", to: 0.55, shape: step}
+
+- name: paymentsvc_request_duration_seconds
+  unit: seconds
+  labels: {quantile: p99}
+  baseline: 0.6
+  jitter: 0.03
+  pattern: sawtooth
+  sawtooth: {period: "100s", amplitude: 0.9}             # bursty — tracks the CFS period
+  segments:
+    - {at: "T-8m", to: 1.7, shape: ramp, over: "6m"}
+    - {at: "T+34m", to: 0.6, shape: step}
+
+- name: paymentsvc_request_duration_seconds
+  unit: seconds
+  labels: {quantile: p50}
+  baseline: 0.11
+  jitter: 0.01
+  segments:
+    - {at: "T-8m", to: 0.22, shape: ramp, over: "6m"}
+    - {at: "T+34m", to: 0.11, shape: step}
+
+- name: paymentsvc_request_rate
+  unit: count/s
+  baseline: 38.0
+  jitter: 2.0                                            # traffic is flat — rules out a load-driven cause
+
+- name: paymentsvc_http_5xx_rate
+  unit: ratio
+  baseline: 0.002
+  jitter: 0.0008                                         # no error increase
+
+- name: paymentsvc_charge_success_rate
+  unit: ratio
+  baseline: 0.999
+  jitter: 0.0005
+  ceil: 1.0
+
+- name: paymentsvc_acquirer_request_duration_seconds
+  unit: seconds
+  labels: {quantile: p95}
+  baseline: 0.18
+  jitter: 0.02                                           # no upstream slowdown

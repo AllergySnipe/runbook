@@ -1,0 +1,16 @@
+# Everything flat within normal jitter — no segments anywhere.
+- {name: paymentsvc_request_duration_seconds, unit: seconds, labels: {quantile: p50}, baseline: 0.10, jitter: 0.008}
+- {name: paymentsvc_request_duration_seconds, unit: seconds, labels: {quantile: p95}, baseline: 0.27, jitter: 0.02}
+- {name: paymentsvc_request_duration_seconds, unit: seconds, labels: {quantile: p99}, baseline: 0.41, jitter: 0.03}
+- {name: paymentsvc_db_pool_checked_out, unit: connections, baseline: 6, jitter: 1.0, ceil: 20}
+- {name: paymentsvc_db_pool_size, unit: connections, baseline: 20}
+- {name: paymentsvc_db_query_duration_seconds, unit: seconds, labels: {quantile: p99}, baseline: 0.05, jitter: 0.004}
+- {name: paymentsvc_http_5xx_rate, unit: ratio, baseline: 0.002, jitter: 0.0008}
+- {name: paymentsvc_charge_success_rate, unit: ratio, baseline: 0.999, jitter: 0.0004, ceil: 1.0}
+- {name: paymentsvc_acquirer_request_duration_seconds, unit: seconds, labels: {quantile: p95}, baseline: 0.18, jitter: 0.02}
+- {name: container_cpu_cfs_throttled_ratio, unit: ratio, baseline: 0.03, jitter: 0.01, ceil: 1.0}
+- {name: postgres_cpu_usage_ratio, unit: ratio, baseline: 0.34, jitter: 0.03, ceil: 1.0}
+- {name: postgres_locks_waiting, unit: count, baseline: 0}
+- {name: payments_events_consumer_lag, unit: messages, labels: {group: ledger}, baseline: 190, jitter: 40}
+- {name: redis_used_memory_ratio, unit: ratio, baseline: 0.68, jitter: 0.01, ceil: 1.0}
+- {name: paymentsvc_idempotency_miss_ratio, unit: ratio, baseline: 0.0008, jitter: 0.0003, ceil: 1.0}

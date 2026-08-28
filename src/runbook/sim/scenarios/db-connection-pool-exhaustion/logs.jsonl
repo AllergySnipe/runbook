@@ -1,0 +1,8 @@
+# Hand-written signal lines. `at` is relative to the anchor; `count`/`every_s` repeat a recurring line.
+{"at": "T-9m", "level": "INFO", "message": "deploy 2026.8.28-4f9c1a2 applied: charge lookup refactor (charge_lookup_v2)"}
+{"at": "T-1m", "level": "WARN", "count": 6, "every_s": 70, "message": "charge query slow: 812ms (baseline ~50ms) query=charge_lookup_v2"}
+{"at": "T+2m", "level": "ERROR", "count": 30, "every_s": 45, "message": "pool timeout: no connection available after 5000ms path=POST /charges"}
+{"at": "T+3m", "level": "WARN", "count": 18, "every_s": 60, "message": "db connection held 5213ms path=POST /charges (slow); check_out_to_release exceeded budget"}
+{"at": "T+6m", "level": "ERROR", "count": 8, "every_s": 110, "message": "upstream request cancelled: context deadline exceeded while waiting for db connection"}
+{"at": "T+7m", "level": "INFO", "message": "pool stats: checked_out=20 size=20 idle=0 waiters=41"}
+{"at": "T+24m", "level": "INFO", "message": "deploy rollback 2026.8.27-1d0a55e complete; pool draining, waiters clearing"}

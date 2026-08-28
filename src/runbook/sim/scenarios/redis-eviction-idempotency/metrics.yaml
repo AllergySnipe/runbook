@@ -1,0 +1,62 @@
+- name: paymentsvc_idempotency_miss_ratio
+  unit: ratio
+  baseline: 0.001
+  jitter: 0.0004
+  ceil: 1.0
+  segments:
+    - {at: "T-6m", to: 0.041, shape: ramp, over: "8m"}     # crosses the 1% alert threshold
+    - {at: "T+28m", to: 0.001, shape: step}
+
+- name: redis_used_memory_ratio          # used_memory / maxmemory
+  unit: ratio
+  baseline: 0.71
+  jitter: 0.01
+  ceil: 1.0
+  segments:
+    - {at: "T-40m", to: 0.99, shape: ramp, over: "34m"}    # footprint grew after the deploy
+    - {at: "T+28m", to: 0.74, shape: step}
+
+- name: redis_evicted_keys_rate
+  unit: keys/s
+  baseline: 0.0
+  jitter: 0.0
+  segments:
+    - {at: "T-7m", to: 180.0, shape: ramp, over: "8m"}     # eviction is the cause (cause 1)
+    - {at: "T+28m", to: 0.0, shape: step}
+
+- name: redis_keyspace_hit_ratio
+  unit: ratio
+  baseline: 0.985
+  jitter: 0.003
+  ceil: 1.0
+  segments:
+    - {at: "T-6m", to: 0.88, shape: ramp, over: "8m"}
+    - {at: "T+28m", to: 0.985, shape: step}
+
+- name: paymentsvc_duplicate_charge_total
+  unit: count
+  baseline: 0
+  segments:
+    - {at: "T-4m", to: 13.0, shape: ramp, over: "18m"}     # the smoking gun — query Postgres for these
+    - {at: "T+28m", to: 13.0, shape: step}
+
+- name: redis_command_latency_seconds
+  unit: seconds
+  labels: {quantile: p99}
+  baseline: 0.0009
+  jitter: 0.0003
+  segments:
+    - {at: "T-4m", to: 0.006, shape: ramp, over: "6m"}     # mild — this is memory pressure, not an outage
+    - {at: "T+28m", to: 0.0009, shape: step}
+
+- name: paymentsvc_charge_success_rate
+  unit: ratio
+  baseline: 0.999
+  jitter: 0.0005
+  ceil: 1.0                                                # charges still succeed — the bug is correctness, not availability
+
+- name: postgres_cpu_usage_ratio
+  unit: ratio
+  baseline: 0.33
+  jitter: 0.03
+  ceil: 1.0

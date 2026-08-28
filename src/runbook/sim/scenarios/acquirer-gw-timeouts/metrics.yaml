@@ -1,0 +1,74 @@
+- name: paymentsvc_http_5xx_rate
+  unit: ratio
+  baseline: 0.003
+  jitter: 0.001
+  segments:
+    - {at: "T+1m", to: 0.062, shape: ramp, over: "3m"}   # crosses the 2% alert threshold
+    - {at: "T+30m", to: 0.003, shape: step}
+
+- name: paymentsvc_acquirer_request_duration_seconds
+  unit: seconds
+  labels: {quantile: p95}
+  baseline: 0.19
+  jitter: 0.02
+  segments:
+    - {at: "T+0", to: 4.6, shape: ramp, over: "4m"}       # climbs toward the 5s client timeout
+    - {at: "T+30m", to: 0.19, shape: step}
+
+- name: paymentsvc_acquirer_request_duration_seconds
+  unit: seconds
+  labels: {quantile: p50}
+  baseline: 0.12
+  jitter: 0.01
+  segments:
+    - {at: "T+0", to: 1.4, shape: ramp, over: "4m"}
+    - {at: "T+30m", to: 0.12, shape: step}
+
+- name: paymentsvc_acquirer_retry_ratio
+  unit: ratio
+  baseline: 0.04
+  jitter: 0.01
+  ceil: 1.0
+  segments:
+    - {at: "T+1m", to: 0.43, shape: ramp, over: "5m"}     # retry storm amplifying the incident (cause 4)
+    - {at: "T+30m", to: 0.04, shape: step}
+
+- name: paymentsvc_acquirer_error_total
+  unit: count/s
+  labels: {type: timeout}
+  baseline: 0.1
+  segments:
+    - {at: "T+1m", to: 14.0, shape: ramp, over: "4m"}
+    - {at: "T+30m", to: 0.1, shape: step}
+
+- name: paymentsvc_charge_attempts_per_second
+  unit: count/s
+  baseline: 42.0
+  jitter: 2.0                                             # attempts flat/rising while successes drop
+
+- name: paymentsvc_charge_success_per_second
+  unit: count/s
+  baseline: 41.6
+  jitter: 1.5
+  segments:
+    - {at: "T+1m", to: 12.0, shape: ramp, over: "4m"}
+    - {at: "T+30m", to: 41.6, shape: step}
+
+- name: paymentsvc_db_pool_checked_out
+  unit: connections
+  baseline: 7
+  jitter: 0.8
+  ceil: 20
+  segments:
+    - {at: "T+3m", to: 15.0, shape: ramp, over: "6m"}     # secondary effect — slow upstream call inside the tx
+    - {at: "T+30m", to: 7.0, shape: step}
+
+- name: paymentsvc_db_pool_size
+  unit: connections
+  baseline: 20
+
+- name: postgres_cpu_usage_ratio
+  unit: ratio
+  baseline: 0.31
+  jitter: 0.03
+  ceil: 1.0

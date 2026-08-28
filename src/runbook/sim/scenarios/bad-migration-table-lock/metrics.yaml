@@ -1,0 +1,64 @@
+- name: paymentsvc_charge_success_rate
+  unit: ratio
+  baseline: 0.999
+  jitter: 0.0006
+  ceil: 1.0
+  segments:
+    - {at: "T+2m", to: 0.41, shape: ramp, over: "2m"}    # sharp onset ~2m after the deploy
+    - {at: "T+19m", to: 0.999, shape: step}              # blocking backend terminated
+
+- name: paymentsvc_availability_ratio
+  unit: ratio
+  baseline: 0.999
+  jitter: 0.0006
+  ceil: 1.0
+  segments:
+    - {at: "T+2m", to: 0.42, shape: ramp, over: "2m"}
+    - {at: "T+19m", to: 0.999, shape: step}
+
+- name: postgres_locks_waiting
+  unit: count
+  baseline: 0
+  segments:
+    - {at: "T+1m", to: 41.0, shape: ramp, over: "3m"}    # lock queue pile-up on `charges`
+    - {at: "T+19m", to: 0.0, shape: step}
+
+- name: postgres_cpu_usage_ratio
+  unit: ratio
+  baseline: 0.28
+  jitter: 0.02
+  ceil: 1.0
+  segments:
+    - {at: "T+2m", to: 0.12, shape: ramp, over: "3m"}    # CPU *drops* — backends are waiting, not working
+    - {at: "T+19m", to: 0.28, shape: step}
+
+- name: paymentsvc_db_query_duration_seconds
+  unit: seconds
+  labels: {quantile: p99}
+  baseline: 0.05
+  jitter: 0.004
+  segments:
+    - {at: "T+2m", to: 30.0, shape: step}                # queries hang until the app-level / statement timeout
+    - {at: "T+19m", to: 0.05, shape: step}
+
+- name: paymentsvc_db_pool_checked_out
+  unit: connections
+  baseline: 6
+  jitter: 0.5
+  ceil: 20
+  segments:
+    - {at: "T+2m", to: 20.0, shape: ramp, over: "2m"}    # secondary symptom — pool drains behind the lock
+    - {at: "T+19m", to: 6.0, shape: step}
+
+- name: paymentsvc_db_pool_size
+  unit: connections
+  baseline: 20
+
+- name: paymentsvc_request_duration_seconds
+  unit: seconds
+  labels: {quantile: p99}
+  baseline: 0.4
+  jitter: 0.03
+  segments:
+    - {at: "T+2m", to: 10.0, shape: ramp, over: "2m"}
+    - {at: "T+19m", to: 0.4, shape: step}

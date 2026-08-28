@@ -1,0 +1,13 @@
+service: paymentsvc
+
+upstreams:
+  - {name: postgres-primary, kind: database, health: healthy}
+  - {name: redis-idempotency, kind: cache, health: healthy}
+  - {name: acquirer-gw, kind: external_api, health: healthy, status_url: "https://status.acquirer-gw.example"}
+
+downstreams:
+  - {name: payments-events, kind: queue, health: healthy}
+  - {name: ledger, kind: service, health: healthy}
+  - {name: notification-svc, kind: service, health: healthy}
+
+neighbours: [checkout-web, fraud-scoring, batch-reconciler]

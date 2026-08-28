@@ -1,0 +1,19 @@
+name: noisy-neighbour-cpu-throttling
+service: paymentsvc
+title: "paymentsvc CPU throttling high — noisy neighbour on the node"
+severity: SEV2
+alert: PaymentsvcCpuThrottlingHigh
+anchor: 2026-08-28T11:05:00Z
+incident_window: ["T-15m", "T+40m"]
+expected_runbook: noisy-neighbour-cpu-throttling.md
+
+summary: >
+  Latency p95/p99 rising in bursts (sawtooth, tracking the 100ms CFS period) with
+  no traffic change, no dependency errors, and no paymentsvc deploy. CFS
+  throttled-periods ratio is ~35% while CPU *usage* is only ~65% of the limit —
+  the limit is being consumed in bursts. Node CPU is ~92%: a co-located
+  batch-reconciler pod scaled its parallelism 4->16 at T-20m.
+
+noise:
+  seed: 31
+  lines_per_min: 6

@@ -1,0 +1,19 @@
+name: acquirer-gw-timeouts
+service: paymentsvc
+title: "paymentsvc error rate high — acquirer-gw timeouts / elevated 5xx"
+severity: SEV1
+alert: PaymentsvcErrorRateHigh
+anchor: 2026-08-28T09:15:00Z
+incident_window: ["T-10m", "T+35m"]
+expected_runbook: acquirer-gw-timeouts.md
+
+summary: >
+  5xx on POST /charges crossed 2% at ~T+1m — 502/504s, not 400s. The external
+  card processor acquirer-gw slowed down (their status page reports a partial
+  outage) and paymentsvc calls it synchronously on the charge path. Retry rate
+  climbed past 0.4, amplifying load on an already-slow upstream. No paymentsvc
+  deploy correlates — the change is upstream.
+
+noise:
+  seed: 11
+  lines_per_min: 7

@@ -1,0 +1,12 @@
+# No paymentsvc deploy. A downstream consumer shipped a bad change.
+- at: "T-2d"
+  service: paymentsvc
+  version: "2026.8.26-aa41c9d"
+  migration: false
+  change: "add event schema version header to payments-events messages"
+
+- at: "T-12m"
+  service: ledger
+  version: "2026.8.28-ledger-9f2b"
+  migration: false
+  change: "refactor payments-events handler onto the new schema-version envelope"

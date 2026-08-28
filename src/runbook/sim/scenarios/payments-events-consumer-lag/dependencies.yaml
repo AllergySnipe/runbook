@@ -1,0 +1,28 @@
+service: paymentsvc
+
+upstreams:
+  - name: postgres-primary
+    kind: database
+    health: healthy
+  - name: redis-idempotency
+    kind: cache
+    health: healthy
+  - name: acquirer-gw
+    kind: external_api
+    health: healthy
+    status_url: "https://status.acquirer-gw.example"
+
+downstreams:
+  - name: payments-events
+    kind: queue
+    health: degraded
+    note: "consumer-group 'ledger' lag ~46k, even across all 8 partitions"
+  - name: ledger
+    kind: service
+    health: down
+    note: "crash-looping: 14 restarts in 10m, CrashLoopBackOff; last exit: panic in eventHandler"
+  - name: notification-svc
+    kind: service
+    health: healthy
+
+neighbours: [checkout-web, fraud-scoring]

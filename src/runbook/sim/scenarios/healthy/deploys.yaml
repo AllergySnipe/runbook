@@ -1,0 +1,5 @@
+- at: "T-3h"
+  service: paymentsvc
+  version: "2026.8.28-9de1f40"
+  migration: false
+  change: "routine dependency bumps; no behaviour change — deployed cleanly"

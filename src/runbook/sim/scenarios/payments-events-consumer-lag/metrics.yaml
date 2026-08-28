@@ -1,0 +1,57 @@
+- name: payments_events_consumer_lag
+  unit: messages
+  labels: {group: ledger}
+  baseline: 220
+  jitter: 40
+  segments:
+    - {at: "T-8m", to: 46000.0, shape: ramp, over: "16m"}   # rising monotonically past the 10k threshold
+    - {at: "T+30m", to: 220.0, shape: ramp, over: "10m"}     # draining after the consumer recovers
+
+- name: payments_events_oldest_unacked_age_seconds
+  unit: seconds
+  labels: {group: ledger}
+  baseline: 8
+  jitter: 2
+  segments:
+    - {at: "T-8m", to: 720.0, shape: ramp, over: "16m"}
+    - {at: "T+30m", to: 8.0, shape: ramp, over: "10m"}
+
+- name: payments_events_publish_rate
+  unit: count/s
+  baseline: 44.0
+  jitter: 2.0                                               # publish rate is normal — not a volume surge (rules out cause 3)
+
+- name: paymentsvc_charge_success_rate
+  unit: ratio
+  baseline: 0.999
+  jitter: 0.0005
+  ceil: 1.0                                                 # the pay path is HEALTHY — the distinguishing signal
+
+- name: paymentsvc_http_5xx_rate
+  unit: ratio
+  baseline: 0.002
+  jitter: 0.0007
+
+- name: ledger_pod_restarts_total
+  unit: count
+  baseline: 0
+  segments:
+    - {at: "T-11m", to: 14.0, shape: ramp, over: "10m"}     # crash-looping (cause 1)
+    - {at: "T+28m", to: 14.0, shape: step}
+
+- name: ledger_consume_rate
+  unit: count/s
+  baseline: 44.0
+  jitter: 2.0
+  segments:
+    - {at: "T-10m", to: 3.0, shape: ramp, over: "6m"}       # consumer barely making progress
+    - {at: "T+28m", to: 60.0, shape: step}                  # catch-up burst
+
+- name: merchant_webhook_delivery_age_seconds
+  unit: seconds
+  labels: {quantile: p95}
+  baseline: 4
+  jitter: 1
+  segments:
+    - {at: "T-6m", to: 540.0, shape: ramp, over: "18m"}
+    - {at: "T+32m", to: 4.0, shape: ramp, over: "8m"}

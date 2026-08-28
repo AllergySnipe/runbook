@@ -1,0 +1,19 @@
+name: payments-events-consumer-lag
+service: paymentsvc
+title: "payments-events consumer lag high — delayed webhooks"
+severity: SEV3
+alert: PaymentsEventsConsumerLagHigh
+anchor: 2026-08-28T13:20:00Z
+incident_window: ["T-12m", "T+45m"]
+expected_runbook: payments-events-consumer-lag.md
+
+summary: >
+  Consumer-group lag on payments-events climbed past 45k and oldest-unacked age
+  past 10m. The charge success rate is normal — the pay path is healthy. The
+  ledger consumer is crash-looping (14 restarts in 10m) after a deploy at T-12m
+  that refactored its event handler; lag is even across all partitions, so this
+  is a down consumer, not a poison message.
+
+noise:
+  seed: 43
+  lines_per_min: 6

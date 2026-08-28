@@ -1,0 +1,13 @@
+- at: "T-4d"
+  service: paymentsvc
+  version: "2026.8.24-3ce0a91"
+  migration: true
+  migrations: ["0042_backfill_charge_currency"]
+  change: "backfill charges.currency (batched, off-peak) — completed cleanly"
+
+- at: "T-1m"
+  service: paymentsvc
+  version: "2026.8.28-b7f2c04"
+  migration: true
+  migrations: ["0043_alter_charges_add_region"]
+  change: "ALTER TABLE charges ADD COLUMN region text NOT NULL DEFAULT 'us' (table rewrite; no CONCURRENTLY)"

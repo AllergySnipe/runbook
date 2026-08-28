@@ -1,0 +1,5 @@
+# The tell here is the *absence* of application errors — only scheduler/runtime INFO lines.
+{"at": "T-6m", "level": "INFO", "count": 20, "every_s": 90, "message": "cfs: throttled 34ms in this 100ms period (nr_throttled=612)"}
+{"at": "T-4m", "level": "INFO", "count": 10, "every_s": 150, "message": "runtime: GC assist stall 41ms (scheduler latency elevated)"}
+{"at": "T+0m", "level": "INFO", "message": "node pressure: kubelet reports CPU pressure on node ip-10-4-22-9"}
+{"at": "T+34m", "level": "INFO", "message": "cfs throttling back to baseline; neighbour batch-reconciler scaled back to 4"}

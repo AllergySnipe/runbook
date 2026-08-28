@@ -1,0 +1,95 @@
+# Compact series specs (see sim/series.py). Times are relative to the anchor (T+0).
+
+- name: paymentsvc_request_duration_seconds
+  unit: seconds
+  labels: {quantile: p50}
+  baseline: 0.11
+  jitter: 0.008
+  segments:
+    - {at: "T+8m", to: 0.42, shape: ramp, over: "6m"}   # p50 only moves once the pool is fully drained
+    - {at: "T+25m", to: 0.11, shape: step}
+
+- name: paymentsvc_request_duration_seconds
+  unit: seconds
+  labels: {quantile: p95}
+  baseline: 0.28
+  jitter: 0.02
+  segments:
+    - {at: "T+2m", to: 2.6, shape: ramp, over: "4m"}
+    - {at: "T+25m", to: 0.28, shape: step}
+
+- name: paymentsvc_request_duration_seconds
+  unit: seconds
+  labels: {quantile: p99}
+  baseline: 0.42
+  jitter: 0.03
+  segments:
+    - {at: "T+2m", to: 3.4, shape: ramp, over: "3m"}     # crosses the 2s alert threshold at ~T+3m
+    - {at: "T+24m", to: 0.42, shape: step}
+
+- name: paymentsvc_db_pool_checked_out
+  unit: connections
+  baseline: 5
+  jitter: 0.6
+  ceil: 20
+  segments:
+    - {at: "T+1m", to: 20, shape: ramp, over: "3m"}      # pinned at the pool size — the smoking gun
+    - {at: "T+24m", to: 5, shape: step}
+
+- name: paymentsvc_db_pool_size
+  unit: connections
+  baseline: 20
+
+- name: paymentsvc_db_pool_wait_seconds
+  unit: seconds
+  labels: {quantile: p99}
+  baseline: 0.002
+  jitter: 0.001
+  segments:
+    - {at: "T+2m", to: 5.0, shape: ramp, over: "3m"}     # requests wait the full 5s pool timeout
+    - {at: "T+24m", to: 0.002, shape: step}
+
+- name: paymentsvc_db_query_duration_seconds
+  unit: seconds
+  labels: {quantile: p99}
+  baseline: 0.05
+  jitter: 0.004
+  segments:
+    - {at: "T-9m", to: 0.79, shape: step}                # step change at the deploy — points at a query regression
+    - {at: "T+24m", to: 0.05, shape: step}
+
+- name: paymentsvc_db_query_duration_seconds
+  unit: seconds
+  labels: {quantile: p50}
+  baseline: 0.019
+  jitter: 0.002
+  segments:
+    - {at: "T-9m", to: 0.06, shape: step}
+    - {at: "T+24m", to: 0.019, shape: step}
+
+- name: postgres_cpu_usage_ratio
+  unit: ratio
+  baseline: 0.34
+  jitter: 0.03
+  ceil: 1.0                                              # DB CPU is normal — rules out database overload
+
+- name: postgres_locks_waiting
+  unit: count
+  baseline: 0                                            # no lock waits — rules out the bad-migration failure mode
+
+- name: paymentsvc_charge_success_rate
+  unit: ratio
+  baseline: 0.999
+  jitter: 0.0004
+  ceil: 1.0
+  segments:
+    - {at: "T+4m", to: 0.984, shape: ramp, over: "4m"}   # some requests time out, but charges mostly still succeed
+    - {at: "T+24m", to: 0.999, shape: step}
+
+- name: paymentsvc_http_5xx_rate
+  unit: ratio
+  baseline: 0.002
+  jitter: 0.0008
+  segments:
+    - {at: "T+4m", to: 0.016, shape: ramp, over: "4m"}
+    - {at: "T+24m", to: 0.002, shape: step}

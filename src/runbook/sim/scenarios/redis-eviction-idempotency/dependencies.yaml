@@ -1,0 +1,24 @@
+service: paymentsvc
+
+upstreams:
+  - name: postgres-primary
+    kind: database
+    health: healthy
+  - name: redis-idempotency
+    kind: cache
+    health: degraded
+    note: "used_memory 0.99 of maxmemory; maxmemory-policy allkeys-lru; evicted_keys ~180/s; keyspace hit ratio dropping"
+  - name: acquirer-gw
+    kind: external_api
+    health: healthy
+    status_url: "https://status.acquirer-gw.example"
+
+downstreams:
+  - name: payments-events
+    kind: queue
+    health: healthy
+  - name: ledger
+    kind: service
+    health: healthy
+
+neighbours: [checkout-web, fraud-scoring, notification-svc]

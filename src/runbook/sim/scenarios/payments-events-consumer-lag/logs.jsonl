@@ -1,0 +1,6 @@
+# Signal lives on the lagging consumer (service=ledger). Even lag across partitions => down consumer, not a poison message.
+{"at": "T-11m", "level": "ERROR", "service": "ledger", "count": 30, "every_s": 40, "message": "panic: nil pointer dereference in eventHandler.Process (schema envelope v2, field 'occurred_at')"}
+{"at": "T-10m", "level": "ERROR", "service": "ledger", "count": 14, "every_s": 60, "message": "pod restart: CrashLoopBackOff (back-off 40s restarting failed container)"}
+{"at": "T-6m", "level": "WARN", "service": "paymentsvc", "count": 8, "every_s": 120, "message": "payments-events publish ok but consumer-group ledger lag=31240 rising"}
+{"at": "T+1m", "level": "INFO", "service": "paymentsvc", "message": "charge path healthy: success_rate 0.999, p99 0.44s — pay path unaffected"}
+{"at": "T+28m", "level": "INFO", "service": "ledger", "message": "rollback 2026.8.27-ledger-7c10 deployed; consumer stable, lag draining"}

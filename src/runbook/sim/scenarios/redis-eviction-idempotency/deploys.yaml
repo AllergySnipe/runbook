@@ -1,0 +1,11 @@
+- at: "T-3d"
+  service: paymentsvc
+  version: "2026.8.25-5b1e0c8"
+  migration: false
+  change: "structured logging for the charge path"
+
+- at: "T-40m"
+  service: paymentsvc
+  version: "2026.8.28-c93a7f1"
+  migration: false
+  change: "add per-merchant rate-limit counters in Redis (idempotency keyspace, no separate DB / maxmemory bump)"

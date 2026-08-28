@@ -1,0 +1,18 @@
+- at: "T-3d"
+  service: paymentsvc
+  version: "2026.8.25-9b2e7c1"
+  migration: true
+  migrations: ["0041_add_merchants_country_index"]
+  change: "add merchants(country) index for the settlement report"
+
+- at: "T-9m"
+  service: paymentsvc
+  version: "2026.8.28-4f9c1a2"
+  migration: false
+  change: "refactor charge lookup onto a new query path (charge_lookup_v2)"
+
+- at: "T+24m"
+  service: paymentsvc
+  version: "2026.8.27-1d0a55e"
+  migration: false
+  change: "rollback: revert 4f9c1a2, restore previous charge lookup"
