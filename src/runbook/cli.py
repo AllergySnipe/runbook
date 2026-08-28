@@ -1,13 +1,15 @@
 """The `runbook` CLI. Thin dispatch; each subcommand's work lives in its own module.
 
-runbook migrate [--dry-run]           apply pending SQL migrations
-runbook ingest [--source N] [--refresh]   fetch + chunk + load the corpus
+runbook migrate [--dry-run]              apply pending SQL migrations
+runbook ingest [--source N] [--refresh]  fetch + chunk + load the corpus
+runbook embed [--all]                    embed documents.chunk_text into documents.embedding
 """
 
 from __future__ import annotations
 
 import argparse
 
+from . import embed as _embed
 from . import migrate as _migrate
 from .ingest import ingest as _ingest
 from .ingest.sources import ALL_SOURCES
@@ -32,6 +34,13 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_embed(args: argparse.Namespace) -> int:
+    written = _embed.backfill(only_missing=not args.all)
+    scope = "all" if args.all else "missing"
+    print(f"embed: wrote {written} embeddings ({scope})")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="runbook")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -53,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--refresh", action="store_true", help="re-download remote sources, ignoring the cache"
     )
     ingest.set_defaults(func=_cmd_ingest)
+
+    embed = sub.add_parser("embed", help="embed chunk_text into documents.embedding")
+    embed.add_argument(
+        "--all", action="store_true", help="re-embed every row (default: only rows missing one)"
+    )
+    embed.set_defaults(func=_cmd_embed)
 
     return parser
 

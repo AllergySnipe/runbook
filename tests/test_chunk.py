@@ -46,6 +46,28 @@ def test_oversized_section_is_windowed_with_overlap():
     assert all(len(c.text) <= TARGET_CHARS + OVERLAP_CHARS + 50 for c in chunks)
 
 
+def test_parse_danluu_readme():
+    from runbook.ingest.sources import _parse_readme
+
+    md = (
+        "# Config Errors\n"
+        "[Allegro](https://allegro.tech/2018/08/postmortem.html) - blah\n"
+        "[Amazon](https://aws.amazon.com/message/74876-2/)\n"
+        "## Other lists of postmortems\n"
+        "[some list](https://example.com/list)\n"
+        "# Database\n"
+        "[GitHub](https://github.blog/dns-outage-post-mortem/)\n"
+        "[dup](https://aws.amazon.com/message/74876-2/)\n"
+    )
+    entries = _parse_readme(md)
+    urls = [u for _, u, _ in entries]
+    assert "https://allegro.tech/2018/08/postmortem.html" in urls
+    assert "https://github.blog/dns-outage-post-mortem/" in urls
+    assert "https://example.com/list" not in urls  # meta section skipped
+    assert urls.count("https://aws.amazon.com/message/74876-2/") == 1  # deduped
+    assert ("GitHub", "https://github.blog/dns-outage-post-mortem/", "database") in entries
+
+
 def test_real_synthetic_runbook_chunks():
     from runbook.ingest.sources import synthetic_docs
 

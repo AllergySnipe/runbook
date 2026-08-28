@@ -18,10 +18,12 @@ Week 1 in progress:
 - **DB wired** — Neon Postgres linked (`.neon`), `config.py` has pooled + unpooled URLs.
 - **Migrations** — `migrations/*.sql` + `runbook migrate`; `0001` = pgvector + `documents`.
 - **Corpus ingested** — `runbook ingest` fetches synthetic paymentsvc runbooks + Scoutflo
-  SRE playbooks + techlearn runbooks → chunked into `documents` (~2100 rows, `embedding` NULL).
+  SRE playbooks + techlearn runbooks + danluu postmortems → chunked into `documents`.
+- **Embeddings** — `embed.py` (local `fastembed` / BGE-small, 384-dim; ADR-0002),
+  `runbook embed` backfills `documents.embedding`; `0002` migration = `vector(384)` + HNSW.
 
-Not built: embeddings, retrieval, sim, tools, agent loop, triage, guardrails, evals,
-dashboard. Check before assuming a module exists.
+Not built: retrieval (hybrid search + rerank), sim, tools, agent loop, triage, guardrails,
+evals, dashboard. Check before assuming a module exists.
 
 ## Golden rules
 
@@ -60,9 +62,9 @@ dashboard. Check before assuming a module exists.
 docs/              SPEC, ADRs, backlog
 migrations/        plain .sql files, applied by `runbook migrate`
 corpus/synthetic/  hand-written paymentsvc runbooks (committed; part of the corpus)
-data/raw/          ingest cache — fetched tarballs (gitignored)
+data/raw/          ingest cache — fetched tarballs + postmortem text (gitignored)
 src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db.py,
-                   cli.py, migrate.py, ingest/ (fetch + chunk + load)
+                   cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load)
 tests/             deterministic pytest tests (no model calls, no secrets, no DB)
 Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)

@@ -1,20 +1,28 @@
 """Corpus sources.
 
 Each source yields `RawDoc`s. Local sources read from the repo; remote sources
-download a GitHub tarball into `data/raw/` (gitignored) once and reuse it — so a
-re-ingest is offline unless `--refresh` is passed.
+cache their fetches under `data/raw/` (gitignored) and reuse them — so a re-ingest
+is offline unless `--refresh` is passed.
 
-Postmortems (danluu/post-mortems, external HTML) are a separate source added in a
-later commit.
+- `synthetic`  — hand-written paymentsvc runbooks in the repo.
+- GitHub repos — a downloaded tarball of `.md` files.
+- `postmortems` — the ~200 external links in danluu/post-mortems, fetched
+  best-effort and reduced to article text; dead/blocked links are skipped.
 """
 
 from __future__ import annotations
 
+import hashlib
+import re
+import sys
 import tarfile
+import time
+import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RAW_CACHE = _REPO_ROOT / "data" / "raw"
@@ -120,9 +128,101 @@ def github_docs(key: str, *, refresh: bool = False) -> Iterator[RawDoc]:
             )
 
 
+# --- remote: danluu/post-mortems (external articles) ----------------------
+
+_POSTMORTEMS_README = "https://raw.githubusercontent.com/danluu/post-mortems/master/README.md"
+_PM_CACHE = _RAW_CACHE / "postmortems"
+_MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+_MIN_ARTICLE_CHARS = 400
+_FETCH_DELAY_S = 0.5
+
+
+def _http_get(url: str, *, timeout: int = 30) -> bytes:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (compatible; runbook-ingest/0.1; "
+                "+https://github.com/AllergySnipe/runbook)"
+            )
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
+def _parse_readme(md: str) -> list[tuple[str, str, str]]:
+    """Return (name, url, category) for every external link, skipping the
+    meta sections that list other collections rather than incidents."""
+    skip = {"other lists of postmortems", "contributors"}
+    entries: list[tuple[str, str, str]] = []
+    category = "uncategorized"
+    seen: set[str] = set()
+    for line in md.splitlines():
+        h = re.match(r"#{1,6}\s+(.*)", line)
+        if h:
+            category = h.group(1).strip().lower()
+            continue
+        if category in skip:
+            continue
+        for name, url in _MD_LINK.findall(line):
+            if "github.com/danluu/post-mortems" in url or url in seen:
+                continue
+            seen.add(url)
+            entries.append((name.strip(), url, category))
+    return entries
+
+
+def postmortem_docs(*, refresh: bool = False) -> Iterator[RawDoc]:
+    from trafilatura import extract  # heavy import; keep it lazy
+
+    _PM_CACHE.mkdir(parents=True, exist_ok=True)
+    readme_path = _RAW_CACHE / "danluu-post-mortems.md"
+    if not readme_path.exists() or refresh:
+        _RAW_CACHE.mkdir(parents=True, exist_ok=True)
+        readme_path.write_bytes(_http_get(_POSTMORTEMS_README))
+
+    entries = _parse_readme(readme_path.read_text())
+    ok = failed = 0
+    for name, url, category in entries:
+        key = hashlib.sha1(url.encode()).hexdigest()[:16]  # cache key, not security
+        cache = _PM_CACHE / f"{key}.txt"
+
+        if cache.exists() and not refresh:
+            text = cache.read_text()
+        else:
+            time.sleep(_FETCH_DELAY_S)
+            try:
+                html = _http_get(url).decode("utf-8", errors="replace")
+                text = extract(html, url=url, include_comments=False) or ""
+            except (urllib.error.URLError, OSError, ValueError, UnicodeError):
+                # dead links, timeouts, TLS errors, paywalls, malformed responses — all expected
+                text = ""
+            cache.write_text(text)
+
+        if len(text.strip()) < _MIN_ARTICLE_CHARS:
+            failed += 1
+            continue
+        ok += 1
+        yield RawDoc(
+            source="postmortem",
+            origin=urlparse(url).netloc,
+            title=f"{name} — postmortem",
+            url=url,
+            path=url,
+            text=text,
+        )
+
+    print(
+        f"ingest: postmortems — {ok} extracted, {failed} skipped (dead/blocked/thin) "
+        f"of {len(entries)} links",
+        file=sys.stderr,
+    )
+
+
 # --- registry -------------------------------------------------------------
 
-ALL_SOURCES = ("synthetic", *_GITHUB_REPOS.keys())
+ALL_SOURCES = ("synthetic", *_GITHUB_REPOS.keys(), "postmortems")
 
 
 def load_source(name: str, *, refresh: bool = False) -> Iterator[RawDoc]:
@@ -130,4 +230,6 @@ def load_source(name: str, *, refresh: bool = False) -> Iterator[RawDoc]:
         return synthetic_docs()
     if name in _GITHUB_REPOS:
         return github_docs(name, refresh=refresh)
+    if name == "postmortems":
+        return postmortem_docs(refresh=refresh)
     raise ValueError(f"unknown source: {name!r} (known: {', '.join(ALL_SOURCES)})")

@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     database_url: str
     database_url_unpooled: str
 
+    # Embeddings (ADR-0002): local model via fastembed. Changing either value means
+    # a new migration for the vector dimension + a full re-embed.
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_dim: int = 384
+
     # Model routing: a cheap model for triage / classification, a capable model
     # for diagnosis / synthesis.
     triage_model: str = "claude-haiku-4-5"
