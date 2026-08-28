@@ -59,9 +59,7 @@ def run(*, dry_run: bool = False) -> list[str]:
             sql = path.read_text()
             with conn.transaction():
                 conn.execute(sql)
-                conn.execute(
-                    "insert into schema_migrations (version) values (%s)", (version,)
-                )
+                conn.execute("insert into schema_migrations (version) values (%s)", (version,))
             pending.append(version)
 
     return pending

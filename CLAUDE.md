@@ -13,8 +13,15 @@ before any state-changing action.
 Week 0 done — skeleton deployed to Render (https://runbook-cgkn.onrender.com), live model
 call verified in prod. Built: `uv` project, FastAPI (`/health`, `/`, `/api/demo`),
 `Dockerfile`, config + thin LLM wrapper, health tests, git-push-to-deploy.
-Not built: RAG, sim, agent loop, triage, guardrails, evals, dashboard, DB. Check before
-assuming a module exists.
+
+Week 1 in progress:
+- **DB wired** — Neon Postgres linked (`.neon`), `config.py` has pooled + unpooled URLs.
+- **Migrations** — `migrations/*.sql` + `runbook migrate`; `0001` = pgvector + `documents`.
+- **Corpus ingested** — `runbook ingest` fetches synthetic paymentsvc runbooks + Scoutflo
+  SRE playbooks + techlearn runbooks → chunked into `documents` (~2100 rows, `embedding` NULL).
+
+Not built: embeddings, retrieval, sim, tools, agent loop, triage, guardrails, evals,
+dashboard. Check before assuming a module exists.
 
 ## Golden rules
 
@@ -51,11 +58,15 @@ assuming a module exists.
 
 ```
 docs/              SPEC, ADRs, backlog
-src/runbook/       app.py (FastAPI), config.py, llm.py (the one model-call site)
-tests/             deterministic pytest tests (no model calls, no secrets)
+migrations/        plain .sql files, applied by `runbook migrate`
+corpus/synthetic/  hand-written paymentsvc runbooks (committed; part of the corpus)
+data/raw/          ingest cache — fetched tarballs (gitignored)
+src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db.py,
+                   cli.py, migrate.py, ingest/ (fetch + chunk + load)
+tests/             deterministic pytest tests (no model calls, no secrets, no DB)
 Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
-(coming: core/ orchestration, rag/, sim/, evals/, prompts/, migrations/, web/)
+(coming: core/ orchestration, rag/, sim/, evals/, prompts/, web/)
 ```
 
 ## Commands

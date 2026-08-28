@@ -1,6 +1,7 @@
 """The `runbook` CLI. Thin dispatch; each subcommand's work lives in its own module.
 
-    runbook migrate [--dry-run]    apply pending SQL migrations
+runbook migrate [--dry-run]           apply pending SQL migrations
+runbook ingest [--source N] [--refresh]   fetch + chunk + load the corpus
 """
 
 from __future__ import annotations
@@ -8,6 +9,8 @@ from __future__ import annotations
 import argparse
 
 from . import migrate as _migrate
+from .ingest import ingest as _ingest
+from .ingest.sources import ALL_SOURCES
 
 
 def _cmd_migrate(args: argparse.Namespace) -> int:
@@ -21,6 +24,14 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_ingest(args: argparse.Namespace) -> int:
+    stats = _ingest(args.source or None, refresh=args.refresh)
+    for s in stats:
+        print(f"ingest: {s.source:20s} {s.documents:4d} docs  {s.chunks:5d} chunks")
+    print(f"ingest: total {sum(s.chunks for s in stats)} chunks")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="runbook")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -30,6 +41,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="list what would run; apply nothing"
     )
     migrate.set_defaults(func=_cmd_migrate)
+
+    ingest = sub.add_parser("ingest", help="fetch, chunk, and load the corpus")
+    ingest.add_argument(
+        "--source",
+        action="append",
+        choices=ALL_SOURCES,
+        help=f"limit to a source (repeatable); default: all ({', '.join(ALL_SOURCES)})",
+    )
+    ingest.add_argument(
+        "--refresh", action="store_true", help="re-download remote sources, ignoring the cache"
+    )
+    ingest.set_defaults(func=_cmd_ingest)
 
     return parser
 

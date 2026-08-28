@@ -18,3 +18,6 @@ web/dist/
 # OS
 .DS_Store
 .neon
+
+# Ingest cache — fetched corpus, re-downloadable
+data/raw/
