@@ -4,6 +4,7 @@ runbook migrate [--dry-run]              apply pending SQL migrations
 runbook ingest [--source N] [--refresh]  fetch + chunk + load the corpus
 runbook embed [--all]                    embed documents.chunk_text into documents.embedding
 runbook search <query> [-k N] [--mode]   hybrid retrieval over the corpus
+runbook diagnose <scenario> [--alert]    run the incident loop against a sim scenario
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
 """
 
@@ -62,6 +63,65 @@ def _cmd_search(args: argparse.Namespace) -> int:
         print(f"   {h.heading_display}")
         print(f"   {scores}")
         print(f"   {snippet}…")
+    return 0
+
+
+def _cmd_diagnose(args: argparse.Namespace) -> int:
+    """alert → retrieve runbook → tool-use investigation → grounded diagnosis."""
+    import asyncio
+
+    from .core import diagnose
+    from .sim import load_scenario
+
+    sc = load_scenario(args.scenario)
+    alert = args.alert or f"{sc.alert or 'incident'} — {sc.summary.strip()}"
+
+    result = asyncio.run(diagnose(alert, args.scenario, k=args.k))
+    d = result.diagnosis
+
+    print(f"\nalert:    {alert}")
+    print(f"scenario: {result.scenario}")
+    print(
+        f"\nretrieved (k={len(result.retrieved)}): "
+        + ", ".join(dict.fromkeys((c.path or c.source) for c in result.retrieved))
+    )
+    print("\ntool calls:")
+    for tc in result.tool_calls:
+        flag = " [error]" if tc.is_error else ""
+        args_str = ", ".join(f"{k}={v}" for k, v in tc.input.items())
+        print(f"  {tc.name}({args_str}){flag}")
+    if not result.tool_calls:
+        print("  (none)")
+
+    print(f"\n── diagnosis ──  confidence={d.confidence}  failure_mode={d.failure_mode}")
+    print(f"root cause: {d.root_cause}")
+    print(f"summary:    {d.summary}")
+    print("\nevidence:")
+    for e in d.evidence:
+        print(f"  - {e}")
+    print("\nremediation:")
+    for i, step in enumerate(d.remediation_steps):
+        tag = "STATE-CHANGING (needs approval)" if step.state_changing else "read-only"
+        print(f"  {i + 1}. [{tag}] {step.action}")
+        print(f'       ⤷ runbook: "{step.runbook_quote}"')
+    if not d.remediation_steps:
+        print("  (none — escalate to a human)")
+
+    if result.escalate:
+        print("\n→ no grounded remediation proposed — this run escalates to a human")
+    elif result.grounding_issues:
+        print("\n⚠ grounding issues (S3 — Week 2 would regenerate once, then escalate):")
+        for gi in result.grounding_issues:
+            print(f"  step {gi.step_index + 1}: {gi.reason}")
+    else:
+        print("\n✓ every remediation step is grounded in the retrieved runbook")
+
+    if result.hit_max_iters:
+        print("\n⚠ hit the tool-call iteration cap — diagnosis is on partial evidence")
+    print(
+        f"\n{result.iterations} turns · {result.usage['input_tokens']}in/"
+        f"{result.usage['output_tokens']}out tokens · {result.elapsed_s}s"
+    )
     return 0
 
 
@@ -190,6 +250,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-rerank", action="store_true", help="skip the cross-encoder rerank pass"
     )
     search.set_defaults(func=_cmd_search)
+
+    diagnose = sub.add_parser("diagnose", help="run the incident loop against a sim scenario")
+    diagnose.add_argument("scenario", help="sim scenario name (see `runbook sim list`)")
+    diagnose.add_argument(
+        "--alert", help="alert text (default: the scenario's own alert + summary)"
+    )
+    diagnose.add_argument("-k", type=int, default=4, help="runbook chunks to retrieve (default 4)")
+    diagnose.set_defaults(func=_cmd_diagnose)
 
     sim = sub.add_parser("sim", help="inspect the fixture-backed sim by hand")
     sim.add_argument("action", choices=("list", "show", "metrics", "logs", "deploys", "deps"))

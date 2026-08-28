@@ -22,6 +22,8 @@ Design rules (they matter once the model is the caller):
 
 from __future__ import annotations
 
+import dataclasses
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -231,3 +233,154 @@ def get_service_dependencies(
         # v1 sim models one service's graph per scenario.
         return DependencyGraph(service=service)
     return graph
+
+
+# --- the model-facing surface -------------------------------------------
+#
+# JSON Schemas the agent loop passes to the Anthropic API. The `scenario` a run
+# is pinned to is *not* a parameter here — the executor binds it. Descriptions
+# are what the model reads to decide when to reach for a tool, so they carry the
+# "why", not just the "what".
+
+_TIME_ARG = {
+    "type": "string",
+    "description": "ISO-8601, or an offset from incident start T+0 like 'T+5m' / 'T-1h30m'. "
+    "Omit to use the full incident window.",
+}
+
+SCHEMAS: list[dict] = [
+    {
+        "name": "query_metrics",
+        "description": (
+            "Time-series for one metric over a window. Returns a series per label-set "
+            "(latency metrics have quantile=p50/p95/p99) with a pre-computed summary "
+            "(p50/p95/p99, min, max, mean, first, last, delta, trend). Unknown name → the "
+            "list of available metrics. Call this to check the numbers a runbook's "
+            "Diagnosis step names."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "metric": {"type": "string", "description": "exact metric name (Prometheus-style)"},
+                "start": _TIME_ARG,
+                "end": _TIME_ARG,
+            },
+            "required": ["metric"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "search_logs",
+        "description": (
+            "Case-insensitive substring search over the service's log stream in a window. "
+            "Optional level filter (ERROR/WARN/INFO). Returns matching lines oldest-first "
+            "plus how many were scanned. No matches returns a hint — and for some failure "
+            "modes the absence of errors is itself the signal."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "substring to grep for"},
+                "start": _TIME_ARG,
+                "end": _TIME_ARG,
+                "level": {"type": "string", "enum": ["ERROR", "WARN", "INFO"]},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_recent_deploys",
+        "description": (
+            "Releases in a window (default: incident window widened to T-2h), oldest-first, "
+            "with version, timestamp, whether it carried a DB migration, and a change "
+            "summary. Default covers all services — a neighbour's deploy can be the cause."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string", "description": "filter to one service"},
+                "start": _TIME_ARG,
+                "end": _TIME_ARG,
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "get_service_dependencies",
+        "description": (
+            "The dependency graph for the service: upstreams and downstreams (each with "
+            "kind, health, optional status_url/note) and neighbouring services. Use it to "
+            "confirm or rule out an upstream/downstream as the cause."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"service": {"type": "string"}},
+            "required": [],
+            "additionalProperties": False,
+        },
+    },
+]
+
+_MAX_POINTS_IN_RESULT = 24  # downsample series before they go to the model
+
+
+def _jsonable(obj: object) -> object:
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return {k: _jsonable(v) for k, v in dataclasses.asdict(obj).items()}
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v) for v in obj]
+    return obj
+
+
+def _downsample(points: list, n: int = _MAX_POINTS_IN_RESULT) -> list:
+    if len(points) <= n:
+        return points
+    step = len(points) / n
+    picked = [points[min(len(points) - 1, round(i * step))] for i in range(n)]
+    if picked[-1] is not points[-1]:
+        picked[-1] = points[-1]
+    return picked
+
+
+def _result_payload(name: str, result: object) -> object:
+    """Trim a tool return to what the model needs, then make it JSON-safe."""
+    if isinstance(result, MetricQueryResult):
+        return {
+            "metric": result.metric,
+            "error": result.error,
+            "available": result.available,
+            "series": [
+                {
+                    "labels": s.labels,
+                    "unit": s.unit,
+                    "summary": _jsonable(s.summary),
+                    "points": [[p.ts.isoformat(), p.value] for p in _downsample(s.points)],
+                }
+                for s in result.series
+            ],
+        }
+    return _jsonable(result)
+
+
+def run_tool(name: str, scenario: str | Scenario, tool_input: dict) -> tuple[str, bool]:
+    """Execute an allowlisted tool. Returns `(json_string, is_error)`.
+
+    `SPEC.md` S2: a name not in `TOOLS` is refused here, in code — never reachable
+    even if the model asks for it.
+    """
+    fn = TOOLS.get(name)
+    if fn is None:
+        return json.dumps({"error": f"tool {name!r} is not on the allowlist"}), True
+    try:
+        result = fn(scenario, **tool_input)
+    except TypeError as exc:  # bad arguments from the model
+        return json.dumps({"error": f"bad arguments for {name}: {exc}"}), True
+    except Exception as exc:  # noqa: BLE001 - surface any tool failure to the model, don't crash the loop
+        return json.dumps({"error": f"{name} failed: {exc}"}), True
+    return json.dumps(_result_payload(name, result), default=str), False
