@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dim: int = 384
 
+    # Retrieval (ADR-0003): hybrid = pgvector + Postgres full-text, fused with RRF,
+    # then a cross-encoder rerank pass over the fused shortlist.
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    retrieve_candidates: int = 30  # per-list depth pulled before fusion / rerank
+    rerank_enabled: bool = True
+
     # Model routing: a cheap model for triage / classification, a capable model
     # for diagnosis / synthesis.
     triage_model: str = "claude-haiku-4-5"

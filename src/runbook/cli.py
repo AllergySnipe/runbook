@@ -3,6 +3,7 @@
 runbook migrate [--dry-run]              apply pending SQL migrations
 runbook ingest [--source N] [--refresh]  fetch + chunk + load the corpus
 runbook embed [--all]                    embed documents.chunk_text into documents.embedding
+runbook search <query> [-k N] [--mode]   hybrid retrieval over the corpus
 """
 
 from __future__ import annotations
@@ -41,6 +42,28 @@ def _cmd_embed(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_search(args: argparse.Namespace) -> int:
+    from .rag import retrieve
+
+    hits = retrieve(
+        args.query,
+        k=args.k,
+        mode=args.mode,
+        rerank=False if args.no_rerank else None,
+    )
+    if not hits:
+        print("search: no matches")
+        return 0
+    for i, h in enumerate(hits, 1):
+        scores = "  ".join(f"{name}={val:.4g}" for name, val in h.scores.items())
+        snippet = " ".join(h.chunk_text.split())[:200]
+        print(f"\n{i}. {h.title}  [{h.source}/{h.origin}]")
+        print(f"   {h.heading_display}")
+        print(f"   {scores}")
+        print(f"   {snippet}…")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="runbook")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -71,6 +94,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--all", action="store_true", help="re-embed every row (default: only rows missing one)"
     )
     embed.set_defaults(func=_cmd_embed)
+
+    search = sub.add_parser("search", help="hybrid retrieval over the corpus")
+    search.add_argument("query", help="the search query / alert text")
+    search.add_argument("-k", type=int, default=5, help="results to return (default 5)")
+    search.add_argument(
+        "--mode",
+        choices=("hybrid", "vector", "text"),
+        default="hybrid",
+        help="hybrid (default) fuses vector + full-text; vector/text run one leg",
+    )
+    search.add_argument(
+        "--no-rerank", action="store_true", help="skip the cross-encoder rerank pass"
+    )
+    search.set_defaults(func=_cmd_search)
 
     return parser
 

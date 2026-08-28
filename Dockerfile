@@ -9,19 +9,32 @@ ENV PYTHONUNBUFFERED=1 \
 # uv: fast, reproducible installs straight from the committed lockfile
 COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /uvx /bin/
 
+# Create the unprivileged user up front and do everything as it — a late
+# `chown -R /app` would duplicate the whole venv + model cache into a new layer
+# (~500 MB). uv runs fine as non-root.
+RUN useradd -m -u 1000 appuser
 WORKDIR /app
+RUN chown appuser /app
+USER appuser
 
 # Dependencies first — this layer is cached unless pyproject.toml / uv.lock change
-COPY pyproject.toml uv.lock ./
+COPY --chown=appuser pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project
 
 # Then the application code
-COPY src ./src
-COPY README.md ./
+COPY --chown=appuser src ./src
+COPY --chown=appuser README.md ./
 RUN uv sync --frozen
 
-RUN useradd -m -u 1000 appuser && chown -R appuser /app
-USER appuser
+# Bake the retrieval models into the image so prod does no download at runtime and
+# has no network dependency on the query path (ADR-0002 / ADR-0003). Model names
+# must match src/runbook/config.py (embedding_model, rerank_model).
+ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
+RUN uv run --no-sync python -c "\
+from fastembed import TextEmbedding; \
+from fastembed.rerank.cross_encoder import TextCrossEncoder; \
+TextEmbedding('BAAI/bge-small-en-v1.5'); \
+TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2')"
 
 # The platform (Render) injects $PORT; default to 8000 for a bare `docker run`.
 # --no-sync: the venv is already built above; don't re-sync on every container start.

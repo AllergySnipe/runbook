@@ -64,11 +64,12 @@ migrations/        plain .sql files, applied by `runbook migrate`
 corpus/synthetic/  hand-written paymentsvc runbooks (committed; part of the corpus)
 data/raw/          ingest cache — fetched tarballs + postmortem text (gitignored)
 src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db.py,
-                   cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load)
+                   cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
+                   rag/ (hybrid retrieve + rerank)
 tests/             deterministic pytest tests (no model calls, no secrets, no DB)
 Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
-(coming: core/ orchestration, rag/, sim/, evals/, prompts/, web/)
+(coming: core/ orchestration, sim/, evals/, prompts/, web/)
 ```
 
 ## Commands
@@ -78,6 +79,7 @@ uv sync                                              install from the lockfile
 uv run pytest                                         deterministic tests
 uv run ruff check . && uv run ruff format .           lint + format
 uv run uvicorn runbook.app:app --reload --port 8000   local server
+uv run runbook search "<alert text>" [-k N] [--mode]   hybrid retrieval over the corpus
 # coming: uv run runbook diagnose <scenario>, uv run evals
 ```
 
