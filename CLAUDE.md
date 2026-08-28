@@ -18,7 +18,9 @@ Week 1 in progress:
 - **DB wired** — Neon Postgres linked (`.neon`), `config.py` has pooled + unpooled URLs.
 - **Migrations** — `migrations/*.sql` + `runbook migrate`; `0001` = pgvector + `documents`.
 - **Corpus ingested** — `runbook ingest` fetches synthetic paymentsvc runbooks + Scoutflo
-  SRE playbooks + techlearn runbooks + danluu postmortems → chunked into `documents`.
+  SRE playbooks + techlearn runbooks → chunked into `documents` (~2100 rows). danluu
+  postmortems source exists but is opt-in (`--source postmortems`) — external links are
+  slow/flaky; skipped for now.
 - **Embeddings** — `embed.py` (local `fastembed` / BGE-small, 384-dim; ADR-0002),
   `runbook embed` backfills `documents.embedding`; `0002` migration = `vector(384)` + HNSW.
 

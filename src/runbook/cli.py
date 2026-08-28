@@ -12,7 +12,7 @@ import argparse
 from . import embed as _embed
 from . import migrate as _migrate
 from .ingest import ingest as _ingest
-from .ingest.sources import ALL_SOURCES
+from .ingest.sources import ALL_SOURCES, DEFAULT_SOURCES
 
 
 def _cmd_migrate(args: argparse.Namespace) -> int:
@@ -56,7 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--source",
         action="append",
         choices=ALL_SOURCES,
-        help=f"limit to a source (repeatable); default: all ({', '.join(ALL_SOURCES)})",
+        help=(
+            f"limit to a source (repeatable). default run: {', '.join(DEFAULT_SOURCES)}. "
+            f"also available: {', '.join(s for s in ALL_SOURCES if s not in DEFAULT_SOURCES)}"
+        ),
     )
     ingest.add_argument(
         "--refresh", action="store_true", help="re-download remote sources, ignoring the cache"

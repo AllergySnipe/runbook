@@ -134,7 +134,11 @@ _POSTMORTEMS_README = "https://raw.githubusercontent.com/danluu/post-mortems/mas
 _PM_CACHE = _RAW_CACHE / "postmortems"
 _MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _MIN_ARTICLE_CHARS = 400
-_FETCH_DELAY_S = 0.5
+_FETCH_DELAY_S = 0.3
+_PM_FETCH_TIMEOUT_S = 12
+# Hosts to skip outright: archive snapshots are slow/rate-limited and dominate the
+# failure/timeout budget for little gain.
+_PM_SKIP_HOSTS = ("web.archive.org", "webcache.googleusercontent.com")
 
 
 def _http_get(url: str, *, timeout: int = 30) -> bytes:
@@ -185,6 +189,9 @@ def postmortem_docs(*, refresh: bool = False) -> Iterator[RawDoc]:
     entries = _parse_readme(readme_path.read_text())
     ok = failed = 0
     for name, url, category in entries:
+        if any(host in url for host in _PM_SKIP_HOSTS):
+            failed += 1
+            continue
         key = hashlib.sha1(url.encode()).hexdigest()[:16]  # cache key, not security
         cache = _PM_CACHE / f"{key}.txt"
 
@@ -193,7 +200,7 @@ def postmortem_docs(*, refresh: bool = False) -> Iterator[RawDoc]:
         else:
             time.sleep(_FETCH_DELAY_S)
             try:
-                html = _http_get(url).decode("utf-8", errors="replace")
+                html = _http_get(url, timeout=_PM_FETCH_TIMEOUT_S).decode("utf-8", errors="replace")
                 text = extract(html, url=url, include_comments=False) or ""
             except (urllib.error.URLError, OSError, ValueError, UnicodeError):
                 # dead links, timeouts, TLS errors, paywalls, malformed responses — all expected
@@ -222,7 +229,11 @@ def postmortem_docs(*, refresh: bool = False) -> Iterator[RawDoc]:
 
 # --- registry -------------------------------------------------------------
 
+# Every source that can be named with `--source`.
 ALL_SOURCES = ("synthetic", *_GITHUB_REPOS.keys(), "postmortems")
+# What a bare `runbook ingest` runs. `postmortems` is opt-in: the danluu list is
+# ~200 external links, many dead or archive-only, so a full run is slow and flaky.
+DEFAULT_SOURCES = ("synthetic", *_GITHUB_REPOS.keys())
 
 
 def load_source(name: str, *, refresh: bool = False) -> Iterator[RawDoc]:

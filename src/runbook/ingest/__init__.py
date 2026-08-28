@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from ..db import connect
 from .chunk import chunk_markdown
-from .sources import ALL_SOURCES, RawDoc, load_source
+from .sources import DEFAULT_SOURCES, RawDoc, load_source
 
 
 @dataclass
@@ -53,7 +53,7 @@ values (%s, %s, %s, %s, %s, %s, %s::jsonb)
 
 
 def ingest(sources: list[str] | None = None, *, refresh: bool = False) -> list[IngestStats]:
-    names = sources or list(ALL_SOURCES)
+    names = sources or list(DEFAULT_SOURCES)
     stats: list[IngestStats] = []
 
     with connect(direct=True) as conn:
