@@ -107,22 +107,39 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     print("\nevidence:")
     for e in d.evidence:
         print(f"  - {e}")
+    g = result.guardrail
+    verdicts = {v.step_index: v for v in g.verdicts} if g else {}
     print("\nremediation:")
     for i, step in enumerate(d.remediation_steps):
-        tag = "STATE-CHANGING (needs approval)" if step.state_changing else "read-only"
+        v = verdicts.get(i)
+        cls = v.classification if v else ("state-changing" if step.state_changing else "read-only")
+        tag = "STATE-CHANGING (needs approval)" if cls == "state-changing" else "read-only"
         print(f"  {i + 1}. [{tag}] {step.action}")
         print(f'       ⤷ runbook: "{step.runbook_quote}"')
+        if v and v.model_disagreed:
+            print(
+                f"       ⚠ model self-labelled {'state-changing' if step.state_changing else 'read-only'}"
+                f"; guardrail: {v.classification} — {v.reason}"
+            )
     if not d.remediation_steps:
-        print("  (none — escalate to a human)")
+        print("  (none)")
 
-    if result.escalate:
-        print("\n→ no grounded remediation proposed — this run escalates to a human")
-    elif result.grounding_issues:
-        print("\n⚠ grounding issues (S3 — Week 2 would regenerate once, then escalate):")
-        for gi in result.grounding_issues:
-            print(f"  step {gi.step_index + 1}: {gi.reason}")
-    else:
-        print("\n✓ every remediation step is grounded in the retrieved runbook")
+    if g and g.regenerated_for_grounding:
+        note = (
+            f", then dropped {g.dropped_ungrounded} ungrounded step(s)"
+            if g.dropped_ungrounded
+            else ""
+        )
+        print(f"\n⚠ S3: remediation regenerated once for grounding{note}")
+    for c in g.second_pass_concerns if g else []:
+        print(f"⚠ second pass — step {c.step_index + 1}: {c.kind} — {c.detail}")
+
+    banner = {
+        "auto": "→ disposition: AUTO — steps are read-only and grounded",
+        "needs-approval": "→ disposition: NEEDS APPROVAL — a human must approve the state-changing step(s) before this run resolves",
+        "escalate": "→ disposition: ESCALATE — no grounded remediation; hand to a human with the evidence above",
+    }
+    print("\n" + banner.get(result.disposition or "", f"→ disposition: {result.disposition}"))
 
     if result.hit_max_iters:
         print("\n⚠ hit the tool-call iteration cap — diagnosis is on partial evidence")

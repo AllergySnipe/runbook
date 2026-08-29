@@ -1,18 +1,23 @@
-"""The diagnosis loop: triage → retrieve runbook → tool-use investigation →
-grounded structured diagnosis.
+"""The diagnosis loop: triage → retrieve → tool-use investigation → synthesis →
+grounding enforcement → guardrail → disposition.
 
 Explicit and manual on purpose (ADR-0001, ADR-0005): the SDK's tool-runner is
-beta and hides the loop, and the loop is where the safety branches live. First
-branch now in place: **triage** (`core/triage.py`) runs before retrieval —
-`noise-or-flapping` / `need-more-info` short-circuit with no diagnosis; a
-`novel-incident` proceeds but tells the model retrieval is low-prior. The
-approval gate (S1), the tool allowlist enforcement path (S2, already in
-`tools.run_tool`), the guardrail second pass, redaction (S5), and tracing are
-still Week 2.
+beta and hides the loop, and the loop is where the safety branches live.
 
-Grounding (S3): after synthesis we check every remediation step quotes a line
-that actually appears in the retrieved runbook. This slice *flags* violations;
-the "regenerate once, then downgrade to escalate" enforcement is Week 2.
+Safety branches now in place:
+- **Triage** (`core/triage.py`) runs before retrieval — `noise-or-flapping` /
+  `need-more-info` short-circuit with no diagnosis; `novel-incident` proceeds but
+  tells the model retrieval is low-prior.
+- **Grounding enforcement (S3)** — every remediation step must quote a line that
+  appears in the runbook. Ungrounded ⇒ regenerate synthesis once; still
+  ungrounded ⇒ drop those steps; nothing left ⇒ escalate.
+- **Guardrail (`core/guardrail.py`)** — each surviving step is classified
+  read-only vs state-changing independently of the model's self-report, then a
+  cheap second-model pass can only tighten. The run gets a `disposition`:
+  `auto` / `needs-approval` / `escalate`.
+
+Still Week 2: the pending-approval DB row a human resolves (S1 gate),
+redaction (S5), the audit record (S6), tracing.
 """
 
 from __future__ import annotations
@@ -32,9 +37,12 @@ from ..prompts import load as load_prompt
 from ..rag import RetrievedChunk, retrieve
 from ..sim import load_scenario
 from ..tools import SCHEMAS, run_tool
+from .guardrail import GuardrailReport, apply_second_pass, classify_steps, second_pass
 from .triage import TriageResult, triage
 
 MAX_ITERS = 8
+
+Disposition = Literal["auto", "needs-approval", "escalate"]
 
 
 class RemediationStep(BaseModel):
@@ -79,6 +87,8 @@ class DiagnoseResult:
     scenario: str
     triage: TriageResult
     diagnosis: Diagnosis | None
+    guardrail: GuardrailReport | None
+    disposition: Disposition | None
     retrieved: list[RetrievedChunk]
     tool_calls: list[ToolCall]
     iterations: int
@@ -95,15 +105,18 @@ class DiagnoseResult:
 
     @property
     def grounded(self) -> bool:
-        """A proposal with steps, all of which cite a real runbook line. No steps
-        means "escalate to a human" — not grounded, but not a failure either."""
+        """A proposal with steps, all of which cite a real runbook line."""
         if self.diagnosis is None:
             return False
         return bool(self.diagnosis.remediation_steps) and not self.grounding_issues
 
     @property
     def escalate(self) -> bool:
-        return self.diagnosis is not None and not self.diagnosis.remediation_steps
+        return self.disposition == "escalate"
+
+    @property
+    def needs_approval(self) -> bool:
+        return self.disposition == "needs-approval"
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -205,6 +218,8 @@ async def diagnose(
             scenario=scenario_name,
             triage=tri,
             diagnosis=None,
+            guardrail=None,
+            disposition=None,
             retrieved=[],
             tool_calls=[],
             iterations=0,
@@ -274,30 +289,89 @@ async def diagnose(
 
         break  # end_turn, max_tokens, refusal — move to synthesis with what we have
 
-    messages.append(
-        {
-            "role": "user",
-            "content": load_prompt(
-                "synthesize", runbook_source=runbook_source, runbook_text=runbook_text
-            ),
-        }
+    def _account(u) -> None:
+        usage["input_tokens"] += u.input_tokens
+        usage["output_tokens"] += u.output_tokens
+
+    async def _synthesize(extra: str | None = None) -> Diagnosis:
+        msgs = [*messages]
+        if extra is None:
+            msgs.append(
+                {
+                    "role": "user",
+                    "content": load_prompt(
+                        "synthesize", runbook_source=runbook_source, runbook_text=runbook_text
+                    ),
+                }
+            )
+        else:
+            msgs.append({"role": "user", "content": extra})
+        d, u = await llm.parse(msgs, model=model, system=system, schema=Diagnosis, tools=SCHEMAS)
+        _account(u)
+        return d
+
+    # --- synthesis + grounding enforcement (S3) ---------------------------
+    diagnosis = await _synthesize()
+    grounding_issues = _check_grounding(diagnosis, runbook_text)
+    regenerated = False
+    dropped = 0
+    if grounding_issues:
+        regenerated = True
+        detail = "; ".join(f"step {g.step_index + 1} — {g.reason}" for g in grounding_issues)
+        diagnosis = await _synthesize(
+            "Your remediation steps failed the grounding check: "
+            f"{detail}. Every remediation step's `runbook_quote` must be a phrase that "
+            "appears verbatim in the runbook above. Produce the full structured diagnosis "
+            "again: for each step either set `runbook_quote` to a verbatim runbook phrase, "
+            "or omit that step entirely."
+        )
+        grounding_issues = _check_grounding(diagnosis, runbook_text)
+        if grounding_issues:
+            bad = {g.step_index for g in grounding_issues}
+            kept = [s for i, s in enumerate(diagnosis.remediation_steps) if i not in bad]
+            dropped = len(diagnosis.remediation_steps) - len(kept)
+            diagnosis.remediation_steps = kept
+            grounding_issues = []
+
+    # --- guardrail: independent action classification + second pass ------
+    verdicts = classify_steps(diagnosis.remediation_steps, runbook_text)
+    concerns = []
+    second_pass_ran = False
+    if diagnosis.remediation_steps:
+        second_pass_ran = True
+        concerns, sp_usage = await second_pass(
+            diagnosis.remediation_steps, runbook_text, model=settings.triage_model
+        )
+        if sp_usage is not None:
+            _account(sp_usage)
+        apply_second_pass(verdicts, concerns)
+    guardrail = GuardrailReport(
+        verdicts=verdicts,
+        second_pass_concerns=concerns,
+        regenerated_for_grounding=regenerated,
+        dropped_ungrounded=dropped,
+        second_pass_ran=second_pass_ran,
     )
-    diagnosis, syn_usage = await llm.parse(
-        messages, model=model, system=system, schema=Diagnosis, tools=SCHEMAS
-    )
-    usage["input_tokens"] += syn_usage.input_tokens
-    usage["output_tokens"] += syn_usage.output_tokens
+
+    if not diagnosis.remediation_steps:
+        disposition: Disposition = "escalate"
+    elif guardrail.any_state_changing:
+        disposition = "needs-approval"
+    else:
+        disposition = "auto"
 
     return DiagnoseResult(
         alert=alert,
         scenario=scenario_name,
         triage=tri,
         diagnosis=diagnosis,
+        guardrail=guardrail,
+        disposition=disposition,
         retrieved=retrieved,
         tool_calls=tool_calls,
         iterations=iterations,
         hit_max_iters=hit_max,
-        grounding_issues=_check_grounding(diagnosis, runbook_text),
+        grounding_issues=grounding_issues,
         usage=usage,
         elapsed_s=round(time.monotonic() - started, 1),
     )

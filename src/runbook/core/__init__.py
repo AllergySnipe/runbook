@@ -5,15 +5,20 @@ The CLI, and later the dashboard + eval suite, all call the same function here.
 
 from __future__ import annotations
 
+from .guardrail import ActionVerdict, GuardrailReport, classify_action, classify_steps
 from .loop import DiagnoseResult, Diagnosis, RemediationStep, ToolCall, diagnose
 from .triage import TriageResult, triage
 
 __all__ = [
+    "ActionVerdict",
     "DiagnoseResult",
     "Diagnosis",
+    "GuardrailReport",
     "RemediationStep",
     "ToolCall",
     "TriageResult",
+    "classify_action",
+    "classify_steps",
     "diagnose",
     "triage",
 ]

@@ -21,8 +21,8 @@ Week 1 done — full CLI incident loop, `runbook diagnose <scenario>` → ground
   series + payments-domain noise gen; `tools.py` = 4 read-only tools + `TOOLS` allowlist
   (S2) + `SCHEMAS`; `runbook sim`. Per-scenario runbook-linkage tests.
 - Agent loop (ADR-0005): `core/loop.py` `diagnose()` = triage → retrieve → manual tool-use
-  loop (`llm.run_turn` + `tools.run_tool`) → structured `Diagnosis` (`llm.parse`) → grounding
-  check (S3, flag-only). Prompts in `prompts/`. Fake-model unit tests; real runs verified.
+  loop (`llm.run_turn` + `tools.run_tool`) → structured `Diagnosis` (`llm.parse`). Prompts
+  in `prompts/`. Fake-model unit tests; real runs verified.
 
 Week 2 in progress:
 - Triage router (`core/triage.py`, `prompts/triage.md`): prompted classifier on
@@ -31,10 +31,18 @@ Week 2 in progress:
   `noise`/`need-info` short-circuit (`DiagnoseResult.short_circuited`, `diagnosis=None`),
   `novel` proceeds with a low-prior note. Accepts Alertmanager JSON or free text. `runbook
   triage "<alert>"`. Fake-model tests; four real lanes verified.
+- Guardrail layer (`core/guardrail.py`, `prompts/guardrail.md`, ADR-0006): after synthesis,
+  (a) **grounding enforcement (S3)** — ungrounded steps ⇒ regenerate synthesis once ⇒ still
+  ungrounded ⇒ drop them ⇒ nothing left ⇒ escalate; (b) **independent action classification**
+  — each step is `read-only`/`state-changing` by runbook tag + verb scan + fail-safe, *not*
+  the model's `state_changing` self-report (disagreements recorded); (c) **Haiku second pass**
+  — tighten-only. Loop sets `DiagnoseResult.disposition` = `auto | needs-approval | escalate`.
+  Fake-model tests; real runs across 4 scenarios verified.
 
-Not started: approval gate (S1) + guardrail 2nd pass, redaction (S5), incident memory,
-Langfuse, eval suite, dashboard/`web/`. `retrieve()` + tools are sync (run via
-`asyncio.to_thread`). Check before assuming a module exists.
+Not started: the S1 gate itself (pending-approval DB row + `runbook approve|reject`), S6
+audit record, redaction (S5), incident memory, Langfuse, eval suite, dashboard/`web/`.
+`retrieve()` + tools are sync (run via `asyncio.to_thread`). Check before assuming a module
+exists.
 
 ## Golden rules
 
@@ -78,7 +86,7 @@ src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db
                    cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
                    rag/ (hybrid retrieve + rerank), sim/ (fixture env + scenarios/),
                    tools.py (read-only tools + schemas + allowlist),
-                   core/ (triage + the loop), prompts/ (versioned prompt files)
+                   core/ (triage + loop + guardrail), prompts/ (versioned prompt files)
 tests/             deterministic pytest tests (no model calls, no secrets, no DB)
 Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
