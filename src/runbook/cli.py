@@ -6,12 +6,17 @@ runbook embed [--all]                    embed documents.chunk_text into documen
 runbook search <query> [-k N] [--mode]   hybrid retrieval over the corpus
 runbook triage "<alert>"                 classify an alert into a handling lane
 runbook diagnose <scenario> [--alert]    run the incident loop against a sim scenario
+runbook runs [--status S] [-n N]         list recent incident runs
+runbook run <id>                         show one incident run (the audit record)
+runbook approve <id> [--step N] [--by]   approve a run's pending state-changing steps
+runbook reject <id> --note "why" [--by]  reject a run (whole run → rejected)
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 
 from . import embed as _embed
 from . import migrate as _migrate
@@ -86,6 +91,7 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
 
     if result.short_circuited:
         print("\n→ triage short-circuited this alert — the diagnosis loop did not run")
+        _persist_run(result)
         return 0
 
     d = result.diagnosis
@@ -147,7 +153,26 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
         f"\n{result.iterations} turns · {result.usage['input_tokens']}in/"
         f"{result.usage['output_tokens']}out tokens · {result.elapsed_s}s"
     )
+    _persist_run(result)
     return 0
+
+
+def _persist_run(result) -> None:
+    """Write the run to Postgres (the audit record + any pending approvals).
+    A DB failure is surfaced but not fatal — the diagnosis already printed."""
+    from .core import record_run
+
+    try:
+        run = record_run(result)
+    except Exception as exc:  # noqa: BLE001 - persistence is best-effort at the CLI
+        print(f"\n(run not persisted: {exc})")
+        return
+    print(f"\nrun {run.id}  ·  status: {run.status}")
+    if run.status == "awaiting-approval":
+        n = len(run.approvals)
+        print(f"  {n} state-changing step(s) need a human decision:")
+        print(f"    runbook approve {run.id} --by <you>")
+        print(f"    runbook reject  {run.id} --by <you> --note '<why>'")
 
 
 def _cmd_triage(args: argparse.Namespace) -> int:
@@ -165,6 +190,94 @@ def _cmd_triage(args: argparse.Namespace) -> int:
         + ("  (low prior — novel incident)" if result.low_prior else "")
     )
     return 0
+
+
+def _cmd_runs(args: argparse.Namespace) -> int:
+    from .core import list_runs
+
+    runs = list_runs(status=args.status, limit=args.n)
+    if not runs:
+        print("no runs")
+        return 0
+    for r in runs:
+        disp = r.disposition or "—"
+        print(f"{r.id}  {r.created_at:%Y-%m-%d %H:%M}  {r.scenario:34.34s}  {disp:14s}  {r.status}")
+    return 0
+
+
+def _cmd_run_show(args: argparse.Namespace) -> int:
+    from .core import get_run
+
+    r = get_run(args.id)
+    if r is None:
+        print(f"no run {args.id!r}")
+        return 1
+
+    print(f"run {r.id}   {r.created_at:%Y-%m-%d %H:%M:%S}   status: {r.status}")
+    print(f"  scenario:   {r.scenario}")
+    print(f"  alert:      {r.alert}")
+    print(f"  triage:     {r.triage_category} ({r.triage_confidence}) — {r.triage_rationale}")
+    print(f"  disposition:{r.disposition or ' — (short-circuited)'}")
+    if r.retrieved:
+        print("  retrieved:  " + ", ".join(c.get("path") or c.get("title") for c in r.retrieved))
+    if r.tool_calls:
+        print(
+            "  tool calls: "
+            + ", ".join(tc["name"] + ("[err]" if tc.get("is_error") else "") for tc in r.tool_calls)
+        )
+    d = r.diagnosis
+    if d:
+        print(f"\n  root cause: {d.get('root_cause', '')}")
+        print(f"  confidence: {d.get('confidence')}   failure_mode: {d.get('failure_mode')}")
+        print("  remediation:")
+        for i, step in enumerate(d.get("remediation_steps", [])):
+            print(f"    {i + 1}. {step['action']}")
+    if r.approvals:
+        print("\n  approvals:")
+        for a in r.approvals:
+            who = f" — {a.resolved_by}" if a.resolved_by else ""
+            note = f'  note: "{a.note}"' if a.note else ""
+            print(f"    step {a.step_index + 1}: {a.state}{who}{note}")
+            print(f"       {a.action}")
+    print(
+        f"\n  {r.iterations} turns · {r.usage.get('input_tokens', 0)}in/"
+        f"{r.usage.get('output_tokens', 0)}out · {r.elapsed_s}s"
+        + (f"  ·  resolved {r.resolved_at:%Y-%m-%d %H:%M}" if r.resolved_at else "")
+    )
+    return 0
+
+
+def _resolve_run(args: argparse.Namespace, decision: str) -> int:
+    from .core import get_run, resolve_approvals
+
+    r = get_run(args.id)
+    if r is None:
+        print(f"no run {args.id!r}")
+        return 1
+    if r.status != "awaiting-approval":
+        print(f"run {args.id} is {r.status} — nothing to {decision}")
+        return 0
+
+    by = args.by or os.environ.get("USER") or "cli"
+    step = (args.step - 1) if args.step else None
+    r = resolve_approvals(args.id, decision=decision, step=step, by=by, note=args.note)
+
+    print(f"run {r.id}  ·  status: {r.status}")
+    for a in r.approvals:
+        who = f" ({a.resolved_by})" if a.resolved_by else ""
+        print(f"  step {a.step_index + 1}: {a.state}{who}")
+    return 0
+
+
+def _cmd_approve(args: argparse.Namespace) -> int:
+    return _resolve_run(args, "approve")
+
+
+def _cmd_reject(args: argparse.Namespace) -> int:
+    if not args.note:
+        print("reject: --note is required (say why)")
+        return 2
+    return _resolve_run(args, "reject")
 
 
 def _cmd_sim(args: argparse.Namespace) -> int:
@@ -304,6 +417,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     diagnose.add_argument("-k", type=int, default=4, help="runbook chunks to retrieve (default 4)")
     diagnose.set_defaults(func=_cmd_diagnose)
+
+    _STATUSES = ("short-circuited", "awaiting-approval", "resolved", "rejected", "escalated")
+
+    runs = sub.add_parser("runs", help="list recent incident runs")
+    runs.add_argument("--status", choices=_STATUSES, help="filter to one lifecycle state")
+    runs.add_argument("-n", type=int, default=20, help="how many (default 20)")
+    runs.set_defaults(func=_cmd_runs)
+
+    run_show = sub.add_parser("run", help="show one incident run (the audit record)")
+    run_show.add_argument("id", help="run id (e.g. run_a1b2c3d4)")
+    run_show.set_defaults(func=_cmd_run_show)
+
+    approve = sub.add_parser("approve", help="approve a run's pending state-changing steps")
+    approve.add_argument("id", help="run id")
+    approve.add_argument("--step", type=int, help="approve only this step (1-based); default all")
+    approve.add_argument("--by", help="who is approving (default: $USER)")
+    approve.add_argument("--note", help="optional note recorded with the approval")
+    approve.set_defaults(func=_cmd_approve)
+
+    reject = sub.add_parser("reject", help="reject a run (whole run → rejected)")
+    reject.add_argument("id", help="run id")
+    reject.add_argument("--step", type=int, help="reject only this step (1-based); default all")
+    reject.add_argument("--by", help="who is rejecting (default: $USER)")
+    reject.add_argument("--note", required=True, help="why — required")
+    reject.set_defaults(func=_cmd_reject)
 
     sim = sub.add_parser("sim", help="inspect the fixture-backed sim by hand")
     sim.add_argument("action", choices=("list", "show", "metrics", "logs", "deploys", "deps"))

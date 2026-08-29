@@ -7,18 +7,34 @@ from __future__ import annotations
 
 from .guardrail import ActionVerdict, GuardrailReport, classify_action, classify_steps
 from .loop import DiagnoseResult, Diagnosis, RemediationStep, ToolCall, diagnose
+from .store import (
+    ApprovalRecord,
+    RunRecord,
+    compute_status,
+    get_run,
+    list_runs,
+    record_run,
+    resolve_approvals,
+)
 from .triage import TriageResult, triage
 
 __all__ = [
     "ActionVerdict",
+    "ApprovalRecord",
     "DiagnoseResult",
     "Diagnosis",
     "GuardrailReport",
     "RemediationStep",
+    "RunRecord",
     "ToolCall",
     "TriageResult",
     "classify_action",
     "classify_steps",
+    "compute_status",
     "diagnose",
+    "get_run",
+    "list_runs",
+    "record_run",
+    "resolve_approvals",
     "triage",
 ]

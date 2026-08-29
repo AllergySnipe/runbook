@@ -38,9 +38,17 @@ Week 2 in progress:
   the model's `state_changing` self-report (disagreements recorded); (c) **Haiku second pass**
   — tighten-only. Loop sets `DiagnoseResult.disposition` = `auto | needs-approval | escalate`.
   Fake-model tests; real runs across 4 scenarios verified.
+- Approval gate + audit (`core/store.py`, migration `0004`, ADR-0007): **state machine, not
+  a blocking call.** `diagnose()` never touches the DB; the CLI calls `record_run(result)` →
+  one `incident_runs` row (the S6 audit record) + one `pending_approvals` row per
+  state-changing step. `status` ∈ `short-circuited | awaiting-approval | resolved | rejected
+  | escalated`; `compute_status()` is a pure, unit-tested function (the S1 guarantee).
+  `runbook approve|reject <id>` (human-only path to `approved`). `runbook runs` / `runbook
+  run <id>`. Pure tests + skipped-without-DB integration tests; real approve/reject/escalate
+  flows verified against Neon.
 
-Not started: the S1 gate itself (pending-approval DB row + `runbook approve|reject`), S6
-audit record, redaction (S5), incident memory, Langfuse, eval suite, dashboard/`web/`.
+Not started: redaction (S5), incident memory, Langfuse, eval suite, dashboard/`web/`
+(REST+SSE + React). Nothing is *executed* on approval — no state-changing tools exist.
 `retrieve()` + tools are sync (run via `asyncio.to_thread`). Check before assuming a module
 exists.
 
@@ -86,8 +94,9 @@ src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db
                    cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
                    rag/ (hybrid retrieve + rerank), sim/ (fixture env + scenarios/),
                    tools.py (read-only tools + schemas + allowlist),
-                   core/ (triage + loop + guardrail), prompts/ (versioned prompt files)
-tests/             deterministic pytest tests (no model calls, no secrets, no DB)
+                   core/ (triage + loop + guardrail + store), prompts/ (versioned prompt files)
+tests/             pytest — deterministic by default (no model calls, no secrets);
+                   *_integration.py skip themselves without a configured database_url
 Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
 (coming: evals/, web/)
@@ -102,7 +111,11 @@ uv run ruff check . && uv run ruff format .           lint + format
 uv run uvicorn runbook.app:app --reload --port 8000   local server
 uv run runbook search "<alert text>" [-k N] [--mode]   hybrid retrieval over the corpus
 uv run runbook triage "<alert>"                         classify an alert into a handling lane (real model call)
-uv run runbook diagnose <scenario> [--alert ...]        incident loop → grounded diagnosis (real model call)
+uv run runbook diagnose <scenario> [--alert ...]        incident loop → diagnosis + disposition; persists a run
+uv run runbook runs [--status S] [-n N]                 list recent incident runs
+uv run runbook run <id>                                 show one run (the audit record)
+uv run runbook approve <id> [--step N] [--by NAME]      approve a run's pending state-changing steps
+uv run runbook reject <id> --note "why" [--by NAME]     reject a run (whole run → rejected)
 uv run runbook sim <action> <scenario> [...]            inspect the sim (list|show|metrics|logs|deploys|deps)
 # coming: uv run evals
 ```
