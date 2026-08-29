@@ -1,30 +1,160 @@
 """The single place model calls go through.
 
-Deliberately thin — no agent framework (see docs/adr/0001). Tracing, redaction,
-and routing will hook in here later rather than being scattered across call sites.
+Provider: **OpenRouter** (OpenAI-compatible), free models — see `docs/adr/0009`.
+Deliberately thin — no agent framework (ADR-0001). Routing, retry, and (later)
+tracing + redaction hook in here rather than being scattered across call sites.
 
-Three primitives:
+Three primitives, provider-neutral return types so the loop never imports
+`openai`:
+
 - `complete`  — one-shot text (the Week 0 demo endpoint).
-- `run_turn`  — one turn of a tool-use loop; the caller owns the loop and executes
-  the tools (see `core/loop.py`). Kept here so every model call has one choke point.
+- `run_turn`  — one turn of a tool-use loop; returns a `Turn`. The caller owns
+  the loop and executes the tools (see `core/loop.py`).
 - `parse`     — one structured-output call, validated against a Pydantic model.
+  Raises `LLMParseError` when the model can't produce valid output.
+
+Free-tier reality (ADR-0009): 20 requests/min, and free endpoints on shared
+capacity 5xx more than a paid API. `_call_with_retry` backs off on 429/5xx
+(honouring `Retry-After`); `parse` additionally retries a refusal / unparseable
+response a few times before giving up.
 """
 
 from __future__ import annotations
 
-import anthropic
-from pydantic import BaseModel
+import asyncio
+import json
+import random
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import Literal
+
+import openai
+from openai import APIConnectionError, APIStatusError, RateLimitError
+from pydantic import BaseModel, ValidationError
 
 from .config import get_settings
 
-_client: anthropic.AsyncAnthropic | None = None
+_client: openai.AsyncOpenAI | None = None
+
+_RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504}
 
 
-def get_client() -> anthropic.AsyncAnthropic:
+class LLMParseError(RuntimeError):
+    """The model returned no output that validates against the requested schema
+    (a refusal, a truncation, or malformed JSON), after retries."""
+
+
+@dataclass
+class Usage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+@dataclass
+class ToolRequest:
+    """A tool the model wants executed this turn."""
+
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
+class Turn:
+    """The result of one tool-loop turn, provider-neutral."""
+
+    text: str
+    tool_requests: list[ToolRequest] = field(default_factory=list)
+    stop_reason: Literal["tool_calls", "stop", "length", "other"] = "stop"
+    usage: Usage = field(default_factory=Usage)
+    # the assistant message to append to history, in OpenAI chat shape
+    assistant_message: dict = field(default_factory=dict)
+
+
+def get_client() -> openai.AsyncOpenAI:
     global _client
     if _client is None:
-        _client = anthropic.AsyncAnthropic(api_key=get_settings().anthropic_api_key)
+        s = get_settings()
+        _client = openai.AsyncOpenAI(
+            base_url=s.openrouter_base_url,
+            api_key=s.openrouter_api_key,
+            default_headers={"HTTP-Referer": s.openrouter_referer, "X-Title": s.openrouter_title},
+            max_retries=0,  # we own the retry loop (429-aware, Retry-After honoured)
+        )
     return _client
+
+
+def _with_system(messages: list[dict], system: str | None) -> list[dict]:
+    if not system:
+        return messages
+    return [{"role": "system", "content": system}, *messages]
+
+
+def _usage(u: object | None) -> Usage:
+    if u is None:
+        return Usage()
+    return Usage(
+        input_tokens=getattr(u, "prompt_tokens", 0) or 0,
+        output_tokens=getattr(u, "completion_tokens", 0) or 0,
+    )
+
+
+def _norm_finish(reason: str | None) -> Literal["tool_calls", "stop", "length", "other"]:
+    if reason in ("tool_calls", "stop", "length"):
+        return reason  # type: ignore[return-value]
+    return "other"
+
+
+_MAX_CHAIN = 3  # OpenRouter caps the `models` fallback array at 3
+
+
+def _extra_body(model: str, fallbacks: Sequence[str], reasoning_effort: str | None) -> dict:
+    """OpenRouter request extras: a model-fallback chain (free `:free` endpoints
+    each sit on one shared provider pool and 429 often — OpenRouter walks this
+    list on error), and reasoning kept internal so it never bleeds into
+    `.content` / structured output."""
+    body: dict = {"reasoning": {"exclude": True}}
+    if reasoning_effort:
+        body["reasoning"]["effort"] = reasoning_effort
+    chain = list(dict.fromkeys([model, *fallbacks]))[:_MAX_CHAIN]  # de-dup, keep order, cap at 3
+    if len(chain) > 1:
+        body["models"] = chain
+    return body
+
+
+def _retry_after(exc: Exception) -> float | None:
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return None
+    raw = resp.headers.get("retry-after")
+    try:
+        return float(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _call_with_retry(make_call, *, what: str):
+    """Await `make_call()`, retrying 429/5xx/connection errors with backoff."""
+    settings = get_settings()
+    last_exc: Exception | None = None
+    for attempt in range(settings.llm_max_retries + 1):
+        try:
+            return await make_call()
+        except RateLimitError as exc:
+            last_exc = exc
+        except APIStatusError as exc:
+            if exc.status_code not in _RETRYABLE_STATUS:
+                raise
+            last_exc = exc
+        except APIConnectionError as exc:
+            last_exc = exc
+
+        if attempt >= settings.llm_max_retries:
+            break
+        delay = _retry_after(last_exc) or min(30.0, 1.5 * (2**attempt))
+        await asyncio.sleep(delay + random.uniform(0, 0.5))
+    assert last_exc is not None
+    raise last_exc
 
 
 async def complete(
@@ -33,18 +163,20 @@ async def complete(
     model: str,
     system: str | None = None,
     max_tokens: int = 512,
+    fallbacks: Sequence[str] = (),
 ) -> str:
-    """One-shot completion. Returns the concatenated text blocks of the response."""
-    kwargs: dict = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
-    }
-    if system is not None:
-        kwargs["system"] = system
-
-    response = await get_client().messages.create(**kwargs)
-    return "".join(block.text for block in response.content if block.type == "text")
+    """One-shot completion. Returns the response text."""
+    msgs = _with_system([{"role": "user", "content": prompt}], system)
+    resp = await _call_with_retry(
+        lambda: get_client().chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=msgs,
+            extra_body=_extra_body(model, fallbacks, None),
+        ),
+        what="complete",
+    )
+    return resp.choices[0].message.content or ""
 
 
 async def run_turn(
@@ -54,18 +186,75 @@ async def run_turn(
     system: str,
     tools: list[dict],
     max_tokens: int = 2048,
-) -> anthropic.types.Message:
-    """One turn of a tool-use loop. Returns the raw response — the caller inspects
-    `stop_reason`, executes any `tool_use` blocks, and calls again. Adaptive
-    thinking is on (Sonnet 5 accepts no other on-mode)."""
-    return await get_client().messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=system,
-        tools=tools,
-        thinking={"type": "adaptive"},
-        messages=messages,
+    reasoning_effort: str | None = None,
+    fallbacks: Sequence[str] = (),
+) -> Turn:
+    """One turn of a tool-use loop. The caller inspects `stop_reason`, executes
+    any `tool_requests`, appends the tool results + `assistant_message` to
+    history, and calls again."""
+    resp = await _call_with_retry(
+        lambda: get_client().chat.completions.create(
+            model=model,
+            max_tokens=max_tokens,
+            messages=_with_system(messages, system),
+            tools=tools,
+            extra_body=_extra_body(model, fallbacks, reasoning_effort),
+        ),
+        what="run_turn",
     )
+    choice = resp.choices[0]
+    msg = choice.message
+
+    requests: list[ToolRequest] = []
+    for tc in msg.tool_calls or []:
+        try:
+            args = json.loads(tc.function.arguments or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        requests.append(
+            ToolRequest(
+                id=tc.id, name=tc.function.name, arguments=args if isinstance(args, dict) else {}
+            )
+        )
+
+    assistant_message: dict = {"role": "assistant", "content": msg.content}
+    if msg.tool_calls:
+        assistant_message["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+            }
+            for tc in msg.tool_calls
+        ]
+
+    return Turn(
+        text=msg.content or "",
+        tool_requests=requests,
+        stop_reason=_norm_finish(choice.finish_reason),
+        usage=_usage(resp.usage),
+        assistant_message=assistant_message,
+    )
+
+
+def _json_schema_format(schema: type[BaseModel]) -> dict:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": schema.__name__,
+            "strict": True,
+            "schema": schema.model_json_schema(),
+        },
+    }
+
+
+def _content(resp: object) -> str | None:
+    """The assistant text, or None if the provider returned no usable choice
+    (OpenRouter can hand back a 200 whose body is a mid-stream provider error)."""
+    choices = getattr(resp, "choices", None) or []
+    if not choices:
+        return None
+    return choices[0].message.content
 
 
 async def parse[M: BaseModel](
@@ -74,23 +263,48 @@ async def parse[M: BaseModel](
     model: str,
     system: str,
     schema: type[M],
-    tools: list[dict] | None = None,
-    max_tokens: int = 2048,
-) -> tuple[M, anthropic.types.Usage]:
+    max_tokens: int = 4096,
+    fallbacks: Sequence[str] = (),
+) -> tuple[M, Usage]:
     """One structured-output call. Returns `(validated instance, usage)`.
 
-    `tools` can be passed (with `tool_choice=none`) when the message history
-    already contains `tool_use` blocks — the API wants the definitions present
-    even though no tool may be called on this turn."""
-    kwargs: dict = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "system": system,
-        "messages": messages,
-        "output_format": schema,
-    }
-    if tools is not None:
-        kwargs["tools"] = tools
-        kwargs["tool_choice"] = {"type": "none"}
-    response = await get_client().messages.parse(**kwargs)
-    return response.parsed_output, response.usage
+    Uses `create` + manual validation rather than the SDK's `.parse()` helper —
+    that helper `TypeError`s on OpenRouter's non-standard error bodies, and free
+    models emit off-schema JSON often enough that we need to own the retry.
+    Retries a refusal / truncation / off-schema / no-choice response, then raises
+    `LLMParseError` (callers that can degrade — the loop's synthesis — catch it)."""
+    settings = get_settings()
+    msgs = _with_system(messages, system)
+    extra_body = _extra_body(model, fallbacks, None)
+    # only route to endpoints that honour response_format — else a free model
+    # cheerfully replies in prose
+    extra_body.setdefault("provider", {})["require_parameters"] = True
+    fmt = _json_schema_format(schema)
+    last_reason = "no output"
+
+    for attempt in range(settings.llm_max_retries + 1):
+        resp = await _call_with_retry(
+            lambda: get_client().chat.completions.create(
+                model=model,
+                max_tokens=max_tokens,
+                messages=msgs,
+                response_format=fmt,
+                extra_body=extra_body,
+            ),
+            what="parse",
+        )
+        content = _content(resp)
+        if content is None:
+            last_reason = "provider returned no choice (mid-stream error)"
+        elif not content.strip():
+            last_reason = "empty response (likely truncated on reasoning)"
+        else:
+            try:
+                return schema.model_validate_json(content), _usage(resp.usage)
+            except ValidationError as exc:
+                last_reason = f"off-schema output ({str(exc)[:200]})"
+
+        if attempt < settings.llm_max_retries:
+            await asyncio.sleep(1.0 + attempt)
+
+    raise LLMParseError(f"{model}: no valid {schema.__name__} after retries — {last_reason}")

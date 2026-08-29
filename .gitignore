@@ -21,3 +21,6 @@ web/dist/
 
 # Ingest cache — fetched corpus, re-downloadable
 data/raw/
+
+# Eval run artifacts (`runbook eval --json`); the committed baseline is evals/baseline.json
+eval-results/

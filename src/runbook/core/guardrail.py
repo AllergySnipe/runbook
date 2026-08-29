@@ -25,6 +25,7 @@ is the next slice.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
@@ -197,7 +198,7 @@ class SecondPassReport(BaseModel):
 
 
 async def second_pass(
-    steps: list[_Step], runbook_text: str, *, model: str
+    steps: list[_Step], runbook_text: str, *, model: str, fallbacks: Sequence[str] = ()
 ) -> tuple[list[SecondPassConcern], object | None]:
     """A fresh, cheap model looks only at the final proposal + the runbook and
     flags: steps it thinks change state, and steps not supported by the runbook.
@@ -221,7 +222,9 @@ async def second_pass(
             ),
         }
     ]
-    report, usage = await llm.parse(messages, model=model, system=system, schema=SecondPassReport)
+    report, usage = await llm.parse(
+        messages, model=model, system=system, schema=SecondPassReport, fallbacks=fallbacks
+    )
     return report.concerns, usage
 
 

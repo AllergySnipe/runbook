@@ -115,9 +115,16 @@ def _normalise_alert(alert: str | dict) -> str:
 
 async def triage(alert: str | dict, *, model: str | None = None) -> TriageResult:
     """Classify one alert into a handling lane. One cheap model call."""
-    model = model or get_settings().triage_model
+    settings = get_settings()
+    model = model or settings.triage_model
     system = load_prompt("triage")
     normalised = _normalise_alert(alert)
     messages = [{"role": "user", "content": f"Classify this alert:\n\n{normalised}"}]
-    result, _usage = await llm.parse(messages, model=model, system=system, schema=TriageResult)
+    result, _usage = await llm.parse(
+        messages,
+        model=model,
+        system=system,
+        schema=TriageResult,
+        fallbacks=settings.structured_fallbacks,
+    )
     return result

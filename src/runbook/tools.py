@@ -237,10 +237,10 @@ def get_service_dependencies(
 
 # --- the model-facing surface -------------------------------------------
 #
-# JSON Schemas the agent loop passes to the Anthropic API. The `scenario` a run
-# is pinned to is *not* a parameter here — the executor binds it. Descriptions
-# are what the model reads to decide when to reach for a tool, so they carry the
-# "why", not just the "what".
+# OpenAI-style function schemas the agent loop passes to OpenRouter (ADR-0009).
+# The `scenario` a run is pinned to is *not* a parameter here — the executor binds
+# it. Descriptions are what the model reads to decide when to reach for a tool, so
+# they carry the "why", not just the "what".
 
 _TIME_ARG = {
     "type": "string",
@@ -248,79 +248,80 @@ _TIME_ARG = {
     "Omit to use the full incident window.",
 }
 
+
+def _fn(name: str, description: str, properties: dict, required: list[str]) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
 SCHEMAS: list[dict] = [
-    {
-        "name": "query_metrics",
-        "description": (
+    _fn(
+        "query_metrics",
+        (
             "Time-series for one metric over a window. Returns a series per label-set "
             "(latency metrics have quantile=p50/p95/p99) with a pre-computed summary "
             "(p50/p95/p99, min, max, mean, first, last, delta, trend). Unknown name → the "
             "list of available metrics. Call this to check the numbers a runbook's "
             "Diagnosis step names."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "metric": {"type": "string", "description": "exact metric name (Prometheus-style)"},
-                "start": _TIME_ARG,
-                "end": _TIME_ARG,
-            },
-            "required": ["metric"],
-            "additionalProperties": False,
+        {
+            "metric": {"type": "string", "description": "exact metric name (Prometheus-style)"},
+            "start": _TIME_ARG,
+            "end": _TIME_ARG,
         },
-    },
-    {
-        "name": "search_logs",
-        "description": (
+        ["metric"],
+    ),
+    _fn(
+        "search_logs",
+        (
             "Case-insensitive substring search over the service's log stream in a window. "
             "Optional level filter (ERROR/WARN/INFO). Returns matching lines oldest-first "
             "plus how many were scanned. No matches returns a hint — and for some failure "
             "modes the absence of errors is itself the signal."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "substring to grep for"},
-                "start": _TIME_ARG,
-                "end": _TIME_ARG,
-                "level": {"type": "string", "enum": ["ERROR", "WARN", "INFO"]},
-            },
-            "required": ["query"],
-            "additionalProperties": False,
+        {
+            "query": {"type": "string", "description": "substring to grep for"},
+            "start": _TIME_ARG,
+            "end": _TIME_ARG,
+            "level": {"type": "string", "enum": ["ERROR", "WARN", "INFO"]},
         },
-    },
-    {
-        "name": "get_recent_deploys",
-        "description": (
+        ["query"],
+    ),
+    _fn(
+        "get_recent_deploys",
+        (
             "Releases in a window (default: incident window widened to T-2h), oldest-first, "
             "with version, timestamp, whether it carried a DB migration, and a change "
             "summary. Default covers all services — a neighbour's deploy can be the cause."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "service": {"type": "string", "description": "filter to one service"},
-                "start": _TIME_ARG,
-                "end": _TIME_ARG,
-            },
-            "required": [],
-            "additionalProperties": False,
+        {
+            "service": {"type": "string", "description": "filter to one service"},
+            "start": _TIME_ARG,
+            "end": _TIME_ARG,
         },
-    },
-    {
-        "name": "get_service_dependencies",
-        "description": (
+        [],
+    ),
+    _fn(
+        "get_service_dependencies",
+        (
             "The dependency graph for the service: upstreams and downstreams (each with "
             "kind, health, optional status_url/note) and neighbouring services. Use it to "
             "confirm or rule out an upstream/downstream as the cause."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {"service": {"type": "string"}},
-            "required": [],
-            "additionalProperties": False,
-        },
-    },
+        {"service": {"type": "string"}},
+        [],
+    ),
 ]
 
 _MAX_POINTS_IN_RESULT = 24  # downsample series before they go to the model

@@ -11,6 +11,7 @@ runbook run <id>                         show one incident run (the audit record
 runbook approve <id> [--step N] [--by]   approve a run's pending state-changing steps
 runbook reject <id> --note "why" [--by]  reject a run (whole run → rejected)
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
+runbook eval [--scenario N] [--no-judge]  run the golden eval set through the real loop
 """
 
 from __future__ import annotations
@@ -280,6 +281,65 @@ def _cmd_reject(args: argparse.Namespace) -> int:
     return _resolve_run(args, "reject")
 
 
+def _cmd_eval(args: argparse.Namespace) -> int:
+    """Run the golden eval set (`evals/cases.py`) through the real `diagnose()`
+    path, score + judge each case, print a scorecard, compare to the baseline.
+
+    Exit 1 on any hard-check failure, errored case, below-target metric, or
+    regression vs `evals/baseline.json`. Real model + retrieval calls — needs
+    `ANTHROPIC_API_KEY` + `DATABASE_URL`."""
+    import asyncio
+    import json as _json
+    from pathlib import Path
+
+    from .evals import CASES, bless_from_json, load_baseline, run_evals, write_baseline
+
+    if args.bless:
+        try:
+            metrics = bless_from_json(args.bless)
+        except (ValueError, OSError) as exc:
+            print(f"eval: cannot bless — {exc}")
+            return 1
+        print(f"eval: baseline blessed from {args.bless} — commit evals/baseline.json\n  {metrics}")
+        return 0
+
+    cases = list(CASES)
+    if args.scenario:
+        cases = [c for c in cases if c.scenario in set(args.scenario)]
+    if args.case:
+        cases = [c for c in cases if c.id in set(args.case)]
+    if args.limit:
+        cases = cases[: args.limit]
+    if not cases:
+        print("eval: no cases match the filter")
+        return 2
+
+    judge_state = "off" if args.no_judge else "on"
+    print(f"eval: {len(cases)} case(s) · judge {judge_state} · concurrency {args.jobs}")
+    report = asyncio.run(
+        run_evals(cases, use_judge=not args.no_judge, concurrency=args.jobs, progress=print)
+    )
+
+    baseline = load_baseline()
+    print("\n" + report.format(baseline))
+
+    if args.json:
+        out = Path(args.json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(_json.dumps(report.as_dict(), indent=2) + "\n")
+        print(f"\neval: wrote {args.json}")
+
+    if args.update_baseline:
+        if report.hard_findings or report.n_errored:
+            print("\neval: refusing to bless a baseline with hard failures / errored cases")
+            return 1
+        write_baseline(report)
+        print("\neval: baseline blessed — commit evals/baseline.json")
+        return 0
+
+    return 0 if report.passed(baseline) else 1
+
+
 def _cmd_sim(args: argparse.Namespace) -> int:
     """Manual inspection of the sim — the same surface the read-only tools use.
     Not part of the product loop; a debugging aid for the tool-loop slice."""
@@ -442,6 +502,25 @@ def build_parser() -> argparse.ArgumentParser:
     reject.add_argument("--by", help="who is rejecting (default: $USER)")
     reject.add_argument("--note", required=True, help="why — required")
     reject.set_defaults(func=_cmd_reject)
+
+    ev = sub.add_parser("eval", help="run the golden eval set through the real loop")
+    ev.add_argument("--scenario", action="append", help="limit to a sim scenario (repeatable)")
+    ev.add_argument("--case", action="append", help="limit to a case id (repeatable)")
+    ev.add_argument("--limit", type=int, help="run only the first N matching cases")
+    ev.add_argument("--no-judge", action="store_true", help="skip the LLM-judge pass")
+    ev.add_argument("-j", "--jobs", type=int, default=4, help="concurrent cases (default 4)")
+    ev.add_argument("--json", help="also write the full per-case results to this path")
+    ev.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="on a clean run, rewrite evals/baseline.json (the 'written justification')",
+    )
+    ev.add_argument(
+        "--bless",
+        metavar="RESULTS.json",
+        help="bless evals/baseline.json from a prior --json result file, without re-running",
+    )
+    ev.set_defaults(func=_cmd_eval)
 
     sim = sub.add_parser("sim", help="inspect the fixture-backed sim by hand")
     sim.add_argument("action", choices=("list", "show", "metrics", "logs", "deploys", "deps"))

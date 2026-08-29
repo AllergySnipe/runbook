@@ -1,0 +1,13 @@
+{
+  "blessed_at": "2026-08-29T23:37:41+00:00",
+  "n_cases": 30,
+  "metrics": {
+    "triage_accuracy": 1.0,
+    "triage_incident_recall": 1.0,
+    "retrieval_hit_at_3": 1.0,
+    "failure_mode_exact": 1.0,
+    "disposition_match": 1.0,
+    "judge_mean_norm": 0.9083,
+    "judge_pass_rate": 0.9583
+  }
+}

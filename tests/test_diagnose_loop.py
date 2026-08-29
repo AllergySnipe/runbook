@@ -42,12 +42,12 @@ def _usage(i=10, o=5):
     return SimpleNamespace(input_tokens=i, output_tokens=o)
 
 
-def _text_block(text: str):
-    return SimpleNamespace(type="text", text=text)
+def _text_block(text: str) -> dict:
+    return {"kind": "text", "text": text}
 
 
-def _tool_block(name: str, tool_input: dict, id_: str = "tu_1"):
-    return SimpleNamespace(type="tool_use", name=name, input=tool_input, id=id_)
+def _tool_block(name: str, tool_input: dict, id_: str = "tu_1") -> dict:
+    return {"kind": "tool", "name": name, "input": tool_input, "id": id_}
 
 
 def _diagnosis(
@@ -89,8 +89,10 @@ def _triage(category: str = "known-runbook") -> diag.TriageResult:
 def _run(monkeypatch, *, turns, diagnosis, max_iters=8, triage=None, second_pass_concerns=None):
     """Wire fakes and run diagnose().
 
-    `turns` is a list of (stop_reason, content). `diagnosis` is a Diagnosis or a
-    list of them (one per synthesis call, for the grounding-regenerate path).
+    `turns` is a list of `(label, [blocks])` — the label is decorative; the blocks
+    (`_text_block` / `_tool_block`) decide the `llm.Turn`. `diagnosis` is a
+    Diagnosis, or a list (one per synthesis call), or `None` to make synthesis
+    raise `LLMParseError` (a refusal / truncation).
     """
     monkeypatch.setattr(diag, "retrieve", lambda *a, **k: [_chunk()])
 
@@ -103,8 +105,20 @@ def _run(monkeypatch, *, turns, diagnosis, max_iters=8, triage=None, second_pass
     async def fake_run_turn(messages, **kw):
         i = calls["n"]
         calls["n"] += 1
-        stop, content = turns[min(i, len(turns) - 1)]
-        return SimpleNamespace(stop_reason=stop, content=content, usage=_usage())
+        _label, blocks = turns[min(i, len(turns) - 1)]
+        text = " ".join(b["text"] for b in blocks if b["kind"] == "text")
+        reqs = [
+            diag.llm.ToolRequest(id=b["id"], name=b["name"], arguments=b["input"])
+            for b in blocks
+            if b["kind"] == "tool"
+        ]
+        return diag.llm.Turn(
+            text=text,
+            tool_requests=reqs,
+            stop_reason="tool_calls" if reqs else "stop",
+            usage=diag.llm.Usage(10, 5),
+            assistant_message={"role": "assistant", "content": text or None},
+        )
 
     async def fake_parse(messages, *, schema, **kw):
         name = getattr(schema, "__name__", "")
@@ -114,7 +128,10 @@ def _run(monkeypatch, *, turns, diagnosis, max_iters=8, triage=None, second_pass
             return schema(concerns=concerns), _usage(15, 5)
         i = min(syn_calls["n"], len(diag_seq) - 1)
         syn_calls["n"] += 1
-        return diag_seq[i], _usage(100, 40)
+        d = diag_seq[i]
+        if d is None:
+            raise diag.llm.LLMParseError("fake: model refused")
+        return d, _usage(100, 40)
 
     monkeypatch.setattr(diag.llm, "run_turn", fake_run_turn)
     monkeypatch.setattr(diag.llm, "parse", fake_parse)
@@ -290,6 +307,33 @@ def test_novel_incident_proceeds_with_low_prior_note(monkeypatch):
     assert result.triage.low_prior
     assert result.diagnosis is not None
     assert result.disposition == "needs-approval"
+
+
+def test_synthesis_returning_none_escalates_without_crashing(monkeypatch):
+    # llm.parse can hand back parsed_output=None (a refusal, a truncation). The
+    # loop must escalate on the tool evidence, not raise.
+    turns = [("end_turn", [_text_block("looked around")])]
+    result = _run(monkeypatch, turns=turns, diagnosis=None)
+
+    assert result.diagnosis is None
+    assert result.disposition == "escalate"
+    assert result.escalate
+    assert not result.short_circuited  # distinct from a triage short-circuit
+    assert not result.grounded
+    assert result.guardrail is None
+
+
+def test_synthesis_none_on_the_grounding_retry_also_escalates(monkeypatch):
+    turns = [("end_turn", [_text_block("done")])]
+    result = _run(
+        monkeypatch,
+        turns=turns,
+        diagnosis=[_diagnosis("Reboot the universe and hope for the best"), None],
+    )
+
+    assert result.diagnosis is None
+    assert result.disposition == "escalate"
+    assert not result.short_circuited
 
 
 def test_check_grounding_normalises_whitespace_and_case():

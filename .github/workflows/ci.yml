@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: lint + deterministic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: sync (frozen lockfile)
+        run: uv sync --frozen
+
+      - name: ruff
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: pytest
+        # Deterministic by design: no ANTHROPIC_API_KEY, no DATABASE_URL. The
+        # *_integration.py suites and the retrieval-quality gate skip themselves
+        # without a database; the eval suite (real model calls) is run
+        # deliberately with `runbook eval`, never here. See docs/adr/0008.
+        run: uv run pytest -q

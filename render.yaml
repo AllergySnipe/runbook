@@ -2,7 +2,7 @@
 # https://render.com/docs/blueprint-spec
 #
 # Connect this repo in the Render dashboard once; thereafter every push to `main`
-# redeploys. Secrets (ANTHROPIC_API_KEY, DATABASE_URL) are set in the dashboard,
+# redeploys. Secrets (OPENROUTER_API_KEY, DATABASE_URL) are set in the dashboard,
 # NOT here — `sync: false` means "prompt me, don't store in git".
 
 services:
@@ -14,7 +14,7 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      - key: ANTHROPIC_API_KEY
+      - key: OPENROUTER_API_KEY
         sync: false
       # Neon Postgres. Pooled URL for the app, direct (unpooled) for migrations.
       - key: DATABASE_URL

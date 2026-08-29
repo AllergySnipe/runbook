@@ -38,6 +38,9 @@ class DemoResponse(BaseModel):
 @app.post("/api/demo", response_model=DemoResponse)
 async def demo(req: DemoRequest) -> DemoResponse:
     """Smoke test for a live model call. Deleted once the real endpoints land."""
-    model = get_settings().triage_model
-    reply = await complete(req.prompt, model=model, max_tokens=256)
+    settings = get_settings()
+    model = settings.triage_model
+    reply = await complete(
+        req.prompt, model=model, max_tokens=256, fallbacks=settings.loop_fallbacks
+    )
     return DemoResponse(reply=reply, model=model)

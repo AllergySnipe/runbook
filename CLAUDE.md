@@ -10,47 +10,45 @@ before any state-changing action.
 
 ## Status
 
-Week 0 done — FastAPI skeleton (`/health`, `/`, `/api/demo`), Docker, Render deploy
-(https://runbook-cgkn.onrender.com), git-push-to-deploy.
+Week 0–1 done — FastAPI skeleton + Render deploy (https://runbook-cgkn.onrender.com);
+Neon + `migrations/0001`–`0003`; `ingest/` (2102 chunks) + `embed.py` (ADR-0002);
+`rag/` hybrid retrieve + rerank (ADR-0003), hit@3 6/6; `sim/` fixture env + 7 scenarios +
+`tools.py` 4 read-only tools + `TOOLS` allowlist (ADR-0004); `core/loop.py` manual tool-use
+loop → structured `Diagnosis` (ADR-0005).
 
-Week 1 done — full CLI incident loop, `runbook diagnose <scenario>` → grounded diagnosis:
-- Retrieval: Neon Postgres + `migrations/*.sql` (`0001`–`0003`); `ingest/` → 2102 chunks;
-  local embeddings (`embed.py`, ADR-0002); `rag/` hybrid = pgvector ∥ FTS → RRF → rerank
-  (ADR-0003), `runbook search`, hit@3 = 6/6.
-- Sim + tools (ADR-0004): `sim/` fixture env, 7 scenarios (`sim/scenarios/`), deterministic
-  series + payments-domain noise gen; `tools.py` = 4 read-only tools + `TOOLS` allowlist
-  (S2) + `SCHEMAS`; `runbook sim`. Per-scenario runbook-linkage tests.
-- Agent loop (ADR-0005): `core/loop.py` `diagnose()` = triage → retrieve → manual tool-use
-  loop (`llm.run_turn` + `tools.run_tool`) → structured `Diagnosis` (`llm.parse`). Prompts
-  in `prompts/`. Fake-model unit tests; real runs verified.
+Week 2 done so far (CLI incident loop is feature-complete): `core/triage.py` + `prompts/triage.md`
+— prompted classifier → 4 lanes, short-circuits `noise`/`need-info`, `novel` gets a low-prior note.
+`core/guardrail.py` + `prompts/guardrail.md` (ADR-0006) — S3 grounding enforcement (regenerate once → drop → escalate),
+independent read-only/state-changing classification (not the model's self-report), Haiku
+tighten-only second pass; sets `DiagnoseResult.disposition`. `core/store.py` + migration
+`0004` + ADR-0007 — persisted approval gate: `record_run()` writes `incident_runs` (S6 audit)
++ `pending_approvals`; `compute_status()` pure/unit-tested (S1); `runbook runs|run|approve|reject`.
 
-Week 2 in progress:
-- Triage router (`core/triage.py`, `prompts/triage.md`): prompted classifier on
-  `settings.triage_model` → `known-runbook | novel-incident | noise-or-flapping |
-  need-more-info` + rationale (`llm.parse`, `TriageResult`). Runs first in `diagnose()`;
-  `noise`/`need-info` short-circuit (`DiagnoseResult.short_circuited`, `diagnosis=None`),
-  `novel` proceeds with a low-prior note. Accepts Alertmanager JSON or free text. `runbook
-  triage "<alert>"`. Fake-model tests; four real lanes verified.
-- Guardrail layer (`core/guardrail.py`, `prompts/guardrail.md`, ADR-0006): after synthesis,
-  (a) **grounding enforcement (S3)** — ungrounded steps ⇒ regenerate synthesis once ⇒ still
-  ungrounded ⇒ drop them ⇒ nothing left ⇒ escalate; (b) **independent action classification**
-  — each step is `read-only`/`state-changing` by runbook tag + verb scan + fail-safe, *not*
-  the model's `state_changing` self-report (disagreements recorded); (c) **Haiku second pass**
-  — tighten-only. Loop sets `DiagnoseResult.disposition` = `auto | needs-approval | escalate`.
-  Fake-model tests; real runs across 4 scenarios verified.
-- Approval gate + audit (`core/store.py`, migration `0004`, ADR-0007): **state machine, not
-  a blocking call.** `diagnose()` never touches the DB; the CLI calls `record_run(result)` →
-  one `incident_runs` row (the S6 audit record) + one `pending_approvals` row per
-  state-changing step. `status` ∈ `short-circuited | awaiting-approval | resolved | rejected
-  | escalated`; `compute_status()` is a pure, unit-tested function (the S1 guarantee).
-  `runbook approve|reject <id>` (human-only path to `approved`). `runbook runs` / `runbook
-  run <id>`. Pure tests + skipped-without-DB integration tests; real approve/reject/escalate
-  flows verified against Neon.
+Eval suite (ADR-0008): `src/runbook/evals/` — 30-case hand-labelled golden set (`cases.py`),
+hard checks (S1–S3) + soft metrics + reference-based LLM judge (`prompts/eval_judge.md`),
+runs the **real** `diagnose()` (never persists), scorecard + `baseline.json` regression gate.
+`runbook eval` (local only — ~20–30 min on the free tier, `-j 2`; `--bless <results.json>`
+blesses a prior run). **`evals/baseline.json` is blessed** (30/30, all deterministic metrics
+1.00, judge 0.91, hard checks clear — on OpenRouter free models). Deterministic CI
+(`.github/workflows/ci.yml`): ruff + `pytest` on every push.
 
-Not started: redaction (S5), incident memory, Langfuse, eval suite, dashboard/`web/`
-(REST+SSE + React). Nothing is *executed* on approval — no state-changing tools exist.
-`retrieve()` + tools are sync (run via `asyncio.to_thread`). Check before assuming a module
-exists.
+Provider swap (ADR-0009): Anthropic → **OpenRouter free models** — Part A done, smoke-verified,
+15 provider tests (`test_llm.py`). `llm.py` on the `openai` SDK: neutral `Turn`/`Usage`/`ToolRequest`;
+own 429/5xx retry (honours `Retry-After`); per-role model **fallback chains** via
+`extra_body.models` (free `:free` endpoints 429 constantly — chain capped at 3, de-duped);
+`parse` uses `create` + manual `model_validate_json` (SDK `.parse()` `TypeError`s on OpenRouter
+error bodies), retries prose / off-schema / no-choice, sets `provider.require_parameters` +
+`reasoning.exclude`. `tools.py` → OpenAI function schemas; `loop.py` response handling.
+Config chains (`config.py`): parse workhorse = `nvidia/nemotron-3-super-120b-a12b:free`
+(reliably enforces json_schema on the free tier; GLM's one endpoint 429s constantly),
+tool loop = `z-ai/glm-5.2:free` → MiniMax, judge = GLM → nemotron. **Part B done:** eval
+re-run on the free models → all deterministic metrics 1.00, judge 0.91 (vs 0.94 Anthropic),
+hard checks clear; `baseline.json` blessed; ADR-0009 written. No prompt tuning needed (one
+label bug found + fixed). Prod (Render) env var: `OPENROUTER_API_KEY`.
+
+Week 2 not started: dashboard (`web/`, REST+SSE+React), incident memory, Langfuse,
+redaction (S5). Nothing is executed on approval — no state-changing tools. `retrieve()` +
+tools are sync (via `asyncio.to_thread`). Check before assuming a module exists.
 
 ## Golden rules
 
@@ -80,8 +78,10 @@ exists.
 - **Docker** — single image; listens on `$PORT` (`8000` locally).
   Deploy: Render (Docker), `render.yaml` Blueprint, git-push-to-deploy on `main`.
 - Frontend: **Vite + React** in `web/`, built into `web/dist/`, served by FastAPI — Week 2.
-- Models: **Anthropic API** (SDK `anthropic` 1.x, async). Exact IDs — triage /
-  guardrail second-pass: `claude-haiku-4-5`; diagnosis: `claude-sonnet-5`. No date suffixes.
+- Models: **OpenRouter** (OpenAI-compatible, SDK `openai` async), **free models** — ADR-0009.
+  Defaults (`config.py`): triage + guardrail second-pass + diagnosis/synthesis
+  `z-ai/glm-5.2:free`; eval judge `minimax/minimax-m3:free` (different family → less
+  self-preference). `llm.py` is the one call site; it owns 429/5xx retry (free tier = 20 req/min).
 
 ## Layout
 
@@ -94,12 +94,14 @@ src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db
                    cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
                    rag/ (hybrid retrieve + rerank), sim/ (fixture env + scenarios/),
                    tools.py (read-only tools + schemas + allowlist),
-                   core/ (triage + loop + guardrail + store), prompts/ (versioned prompt files)
+                   core/ (triage + loop + guardrail + store), prompts/ (versioned prompt files),
+                   evals/ (golden set + scorers + judge + runner + report + baseline.json)
 tests/             pytest — deterministic by default (no model calls, no secrets);
                    *_integration.py skip themselves without a configured database_url
+.github/workflows/ ci.yml — ruff + deterministic pytest on every push (no secrets)
 Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
-(coming: evals/, web/)
+(coming: web/)
 ```
 
 ## Commands
@@ -117,7 +119,9 @@ uv run runbook run <id>                                 show one run (the audit 
 uv run runbook approve <id> [--step N] [--by NAME]      approve a run's pending state-changing steps
 uv run runbook reject <id> --note "why" [--by NAME]     reject a run (whole run → rejected)
 uv run runbook sim <action> <scenario> [...]            inspect the sim (list|show|metrics|logs|deploys|deps)
-# coming: uv run evals
+uv run runbook eval [--scenario N] [--no-judge] [-j N]  golden eval set → real loop → scorecard vs baseline
+uv run runbook eval --update-baseline                   on a clean run, re-bless evals/baseline.json
+uv run runbook eval --bless eval-results/<run>.json      bless a prior --json run without re-running
 ```
 
 ## Conventions

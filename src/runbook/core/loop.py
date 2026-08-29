@@ -1,8 +1,10 @@
 """The diagnosis loop: triage → retrieve → tool-use investigation → synthesis →
 grounding enforcement → guardrail → disposition.
 
-Explicit and manual on purpose (ADR-0001, ADR-0005): the SDK's tool-runner is
-beta and hides the loop, and the loop is where the safety branches live.
+Explicit and manual on purpose (ADR-0001, ADR-0005): a framework's agentic
+tool-runner hides the loop, and the loop is where the safety branches live.
+Provider is OpenRouter via `llm.py` (ADR-0009) — this module stays provider-neutral
+(`llm.Turn` / `llm.ToolRequest`).
 
 Safety branches now in place:
 - **Triage** (`core/triage.py`) runs before retrieval — `noise-or-flapping` /
@@ -16,8 +18,9 @@ Safety branches now in place:
   cheap second-model pass can only tighten. The run gets a `disposition`:
   `auto` / `needs-approval` / `escalate`.
 
-Still Week 2: the pending-approval DB row a human resolves (S1 gate),
-redaction (S5), the audit record (S6), tracing.
+`diagnose()` returns a `DiagnoseResult` and touches no DB — the CLI persists it
+(the S1 approval gate + S6 audit record, `core/store.py`). Still to come:
+redaction (S5), tracing.
 """
 
 from __future__ import annotations
@@ -100,8 +103,11 @@ class DiagnoseResult:
     @property
     def short_circuited(self) -> bool:
         """Triage routed this to a non-loop lane (`noise-or-flapping` /
-        `need-more-info`). No diagnosis was produced."""
-        return self.diagnosis is None
+        `need-more-info`). No diagnosis was produced and no disposition set.
+
+        Distinct from a synthesis failure, which also has `diagnosis is None` but
+        carries `disposition == "escalate"`."""
+        return self.diagnosis is None and self.disposition is None
 
     @property
     def grounded(self) -> bool:
@@ -178,22 +184,18 @@ def _check_grounding(diagnosis: Diagnosis, runbook_text: str) -> list[GroundingI
     return issues
 
 
-def _tool_results_for(blocks: list, scenario: str, sink: list[ToolCall]) -> list[dict]:
-    results = []
-    for block in blocks:
-        if block.type != "tool_use":
-            continue
-        payload, is_error = run_tool(block.name, scenario, dict(block.input))
-        sink.append(ToolCall(block.name, dict(block.input), payload, is_error))
-        results.append(
-            {
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": payload,
-                "is_error": is_error,
-            }
-        )
-    return results
+def _tool_results_for(
+    requests: list[llm.ToolRequest], scenario: str, sink: list[ToolCall]
+) -> list[dict]:
+    """Execute each requested tool, record it in `sink`, and return one
+    OpenAI-shape `tool` message per call (to append to the message history)."""
+    messages = []
+    for req in requests:
+        args = dict(req.arguments)
+        payload, is_error = run_tool(req.name, scenario, args)
+        sink.append(ToolCall(req.name, args, payload, is_error))
+        messages.append({"role": "tool", "tool_call_id": req.id, "content": payload})
+    return messages
 
 
 async def diagnose(
@@ -207,6 +209,8 @@ async def diagnose(
     started = time.monotonic()
     settings = get_settings()
     model = settings.diagnosis_model
+    loop_fallbacks = settings.loop_fallbacks
+    structured_fallbacks = settings.structured_fallbacks
 
     load_scenario(scenario_name)  # fail early on a bad scenario name
 
@@ -262,38 +266,53 @@ async def diagnose(
 
     while True:
         iterations += 1
-        resp = await llm.run_turn(messages, model=model, system=system, tools=SCHEMAS)
-        usage["input_tokens"] += resp.usage.input_tokens
-        usage["output_tokens"] += resp.usage.output_tokens
-        messages.append({"role": "assistant", "content": resp.content})
+        turn = await llm.run_turn(
+            messages, model=model, system=system, tools=SCHEMAS, fallbacks=loop_fallbacks
+        )
+        usage["input_tokens"] += turn.usage.input_tokens
+        usage["output_tokens"] += turn.usage.output_tokens
+        messages.append(turn.assistant_message)
 
-        if resp.stop_reason == "tool_use":
+        if turn.stop_reason == "tool_calls" and turn.tool_requests:
             if iterations >= max_iters:
                 hit_max = True
                 # answer the pending tool calls so history stays valid, then stop
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": _tool_results_for(resp.content, scenario_name, tool_calls),
-                    }
-                )
+                messages.extend(_tool_results_for(turn.tool_requests, scenario_name, tool_calls))
                 break
             results = await asyncio.to_thread(
-                _tool_results_for, resp.content, scenario_name, tool_calls
+                _tool_results_for, turn.tool_requests, scenario_name, tool_calls
             )
-            messages.append({"role": "user", "content": results})
+            messages.extend(results)
             continue
 
-        if resp.stop_reason == "pause_turn":
-            continue  # re-send; server-tool artifact (we have none, but be safe)
-
-        break  # end_turn, max_tokens, refusal — move to synthesis with what we have
+        break  # stop / length / other — move to synthesis with what we have
 
     def _account(u) -> None:
         usage["input_tokens"] += u.input_tokens
         usage["output_tokens"] += u.output_tokens
 
-    async def _synthesize(extra: str | None = None) -> Diagnosis:
+    def _synthesis_failed() -> DiagnoseResult:
+        """The synthesis call produced no parseable structured output (a refusal,
+        a truncation, an unparseable response). Don't crash mid-incident — hand
+        the tool evidence to a human. `diagnosis is None` + `disposition ==
+        'escalate'` distinguishes this from a triage short-circuit."""
+        return DiagnoseResult(
+            alert=alert,
+            scenario=scenario_name,
+            triage=tri,
+            diagnosis=None,
+            guardrail=None,
+            disposition="escalate",
+            retrieved=retrieved,
+            tool_calls=tool_calls,
+            iterations=iterations,
+            hit_max_iters=hit_max,
+            grounding_issues=[],
+            usage=usage,
+            elapsed_s=round(time.monotonic() - started, 1),
+        )
+
+    async def _synthesize(extra: str | None = None) -> Diagnosis | None:
         msgs = [*messages]
         if extra is None:
             msgs.append(
@@ -306,25 +325,35 @@ async def diagnose(
             )
         else:
             msgs.append({"role": "user", "content": extra})
-        d, u = await llm.parse(msgs, model=model, system=system, schema=Diagnosis, tools=SCHEMAS)
+        try:
+            d, u = await llm.parse(
+                msgs, model=model, system=system, schema=Diagnosis, fallbacks=structured_fallbacks
+            )
+        except llm.LLMParseError:
+            return None
         _account(u)
         return d
 
     # --- synthesis + grounding enforcement (S3) ---------------------------
     diagnosis = await _synthesize()
+    if diagnosis is None:
+        return _synthesis_failed()
     grounding_issues = _check_grounding(diagnosis, runbook_text)
     regenerated = False
     dropped = 0
     if grounding_issues:
         regenerated = True
         detail = "; ".join(f"step {g.step_index + 1} — {g.reason}" for g in grounding_issues)
-        diagnosis = await _synthesize(
+        regen = await _synthesize(
             "Your remediation steps failed the grounding check: "
             f"{detail}. Every remediation step's `runbook_quote` must be a phrase that "
             "appears verbatim in the runbook above. Produce the full structured diagnosis "
             "again: for each step either set `runbook_quote` to a verbatim runbook phrase, "
             "or omit that step entirely."
         )
+        if regen is None:
+            return _synthesis_failed()
+        diagnosis = regen
         grounding_issues = _check_grounding(diagnosis, runbook_text)
         if grounding_issues:
             bad = {g.step_index for g in grounding_issues}
@@ -340,7 +369,10 @@ async def diagnose(
     if diagnosis.remediation_steps:
         second_pass_ran = True
         concerns, sp_usage = await second_pass(
-            diagnosis.remediation_steps, runbook_text, model=settings.triage_model
+            diagnosis.remediation_steps,
+            runbook_text,
+            model=settings.triage_model,
+            fallbacks=structured_fallbacks,
         )
         if sp_usage is not None:
             _account(sp_usage)
