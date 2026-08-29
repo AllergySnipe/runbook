@@ -20,13 +20,21 @@ Week 1 done — full CLI incident loop, `runbook diagnose <scenario>` → ground
 - Sim + tools (ADR-0004): `sim/` fixture env, 7 scenarios (`sim/scenarios/`), deterministic
   series + payments-domain noise gen; `tools.py` = 4 read-only tools + `TOOLS` allowlist
   (S2) + `SCHEMAS`; `runbook sim`. Per-scenario runbook-linkage tests.
-- Agent loop (ADR-0005): `core/loop.py` `diagnose()` = retrieve → manual tool-use loop
-  (`llm.run_turn` + `tools.run_tool`) → structured `Diagnosis` (`llm.parse`) → grounding
+- Agent loop (ADR-0005): `core/loop.py` `diagnose()` = triage → retrieve → manual tool-use
+  loop (`llm.run_turn` + `tools.run_tool`) → structured `Diagnosis` (`llm.parse`) → grounding
   check (S3, flag-only). Prompts in `prompts/`. Fake-model unit tests; real runs verified.
 
-Not started: triage router, approval gate (S1) + guardrail 2nd pass, redaction (S5), Langfuse,
-eval suite, dashboard/`web/`. `retrieve()` + tools are sync (run via `asyncio.to_thread`).
-`diagnose` takes the alert text as given. Check before assuming a module exists.
+Week 2 in progress:
+- Triage router (`core/triage.py`, `prompts/triage.md`): prompted classifier on
+  `settings.triage_model` → `known-runbook | novel-incident | noise-or-flapping |
+  need-more-info` + rationale (`llm.parse`, `TriageResult`). Runs first in `diagnose()`;
+  `noise`/`need-info` short-circuit (`DiagnoseResult.short_circuited`, `diagnosis=None`),
+  `novel` proceeds with a low-prior note. Accepts Alertmanager JSON or free text. `runbook
+  triage "<alert>"`. Fake-model tests; four real lanes verified.
+
+Not started: approval gate (S1) + guardrail 2nd pass, redaction (S5), incident memory,
+Langfuse, eval suite, dashboard/`web/`. `retrieve()` + tools are sync (run via
+`asyncio.to_thread`). Check before assuming a module exists.
 
 ## Golden rules
 
@@ -69,8 +77,8 @@ data/raw/          ingest cache — fetched tarballs + postmortem text (gitignor
 src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db.py,
                    cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
                    rag/ (hybrid retrieve + rerank), sim/ (fixture env + scenarios/),
-                   tools.py (read-only tools + schemas + allowlist), core/ (the loop),
-                   prompts/ (versioned prompt files)
+                   tools.py (read-only tools + schemas + allowlist),
+                   core/ (triage + the loop), prompts/ (versioned prompt files)
 tests/             deterministic pytest tests (no model calls, no secrets, no DB)
 Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
@@ -85,6 +93,7 @@ uv run pytest                                         deterministic tests
 uv run ruff check . && uv run ruff format .           lint + format
 uv run uvicorn runbook.app:app --reload --port 8000   local server
 uv run runbook search "<alert text>" [-k N] [--mode]   hybrid retrieval over the corpus
+uv run runbook triage "<alert>"                         classify an alert into a handling lane (real model call)
 uv run runbook diagnose <scenario> [--alert ...]        incident loop → grounded diagnosis (real model call)
 uv run runbook sim <action> <scenario> [...]            inspect the sim (list|show|metrics|logs|deploys|deps)
 # coming: uv run evals

@@ -63,11 +63,16 @@ def _diagnosis(quote: str) -> diag.Diagnosis:
     )
 
 
-def _run(monkeypatch, *, turns, diagnosis, max_iters=8):
+def _triage(category: str = "known-runbook") -> diag.TriageResult:
+    return diag.TriageResult(category=category, rationale="fake", confidence="high")
+
+
+def _run(monkeypatch, *, turns, diagnosis, max_iters=8, triage=None):
     """Wire fakes and run diagnose(). `turns` is a list of (stop_reason, content)."""
     monkeypatch.setattr(diag, "retrieve", lambda *a, **k: [_chunk()])
 
     calls = {"n": 0}
+    triage_result = triage or _triage()
 
     async def fake_run_turn(messages, **kw):
         i = calls["n"]
@@ -75,7 +80,9 @@ def _run(monkeypatch, *, turns, diagnosis, max_iters=8):
         stop, content = turns[min(i, len(turns) - 1)]
         return SimpleNamespace(stop_reason=stop, content=content, usage=_usage())
 
-    async def fake_parse(messages, **kw):
+    async def fake_parse(messages, *, schema, **kw):
+        if schema is diag.TriageResult:
+            return triage_result, _usage(20, 10)
         return diagnosis, _usage(100, 40)
 
     monkeypatch.setattr(diag.llm, "run_turn", fake_run_turn)
@@ -142,6 +149,38 @@ def test_bad_tool_arguments_come_back_as_an_error_result(monkeypatch):
 
     assert result.tool_calls[0].is_error is True
     assert "bad arguments" in result.tool_calls[0].result_json
+
+
+def test_triage_short_circuit_skips_the_loop(monkeypatch):
+    turns = [("end_turn", [_text_block("should never run")])]
+    result = _run(
+        monkeypatch,
+        turns=turns,
+        diagnosis=_diagnosis("Roll back the implicated deploy"),
+        triage=_triage("noise-or-flapping"),
+    )
+
+    assert result.short_circuited
+    assert result.diagnosis is None
+    assert result.triage.category == "noise-or-flapping"
+    assert result.tool_calls == []
+    assert result.iterations == 0
+    assert not result.grounded
+    assert not result.escalate
+
+
+def test_novel_incident_proceeds_with_low_prior_note(monkeypatch):
+    turns = [("end_turn", [_text_block("looked around")])]
+    result = _run(
+        monkeypatch,
+        turns=turns,
+        diagnosis=_diagnosis("Roll back the implicated deploy"),
+        triage=_triage("novel-incident"),
+    )
+
+    assert not result.short_circuited
+    assert result.triage.low_prior
+    assert result.diagnosis is not None
 
 
 def test_check_grounding_normalises_whitespace_and_case():

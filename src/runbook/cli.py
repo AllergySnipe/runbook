@@ -4,6 +4,7 @@ runbook migrate [--dry-run]              apply pending SQL migrations
 runbook ingest [--source N] [--refresh]  fetch + chunk + load the corpus
 runbook embed [--all]                    embed documents.chunk_text into documents.embedding
 runbook search <query> [-k N] [--mode]   hybrid retrieval over the corpus
+runbook triage "<alert>"                 classify an alert into a handling lane
 runbook diagnose <scenario> [--alert]    run the incident loop against a sim scenario
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
 """
@@ -77,10 +78,17 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     alert = args.alert or f"{sc.alert or 'incident'} — {sc.summary.strip()}"
 
     result = asyncio.run(diagnose(alert, args.scenario, k=args.k))
-    d = result.diagnosis
 
     print(f"\nalert:    {alert}")
     print(f"scenario: {result.scenario}")
+    t = result.triage
+    print(f"triage:   {t.category}  ({t.confidence})  — {t.rationale}")
+
+    if result.short_circuited:
+        print("\n→ triage short-circuited this alert — the diagnosis loop did not run")
+        return 0
+
+    d = result.diagnosis
     print(
         f"\nretrieved (k={len(result.retrieved)}): "
         + ", ".join(dict.fromkeys((c.path or c.source) for c in result.retrieved))
@@ -121,6 +129,23 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     print(
         f"\n{result.iterations} turns · {result.usage['input_tokens']}in/"
         f"{result.usage['output_tokens']}out tokens · {result.elapsed_s}s"
+    )
+    return 0
+
+
+def _cmd_triage(args: argparse.Namespace) -> int:
+    """Classify one alert into a handling lane (no loop, one cheap model call)."""
+    import asyncio
+
+    from .core import triage
+
+    result = asyncio.run(triage(args.alert))
+    print(f"category:   {result.category}")
+    print(f"confidence: {result.confidence}")
+    print(f"rationale:  {result.rationale}")
+    print(
+        f"\n→ {'proceed to the diagnosis loop' if result.proceed else 'short-circuit — loop does not run'}"
+        + ("  (low prior — novel incident)" if result.low_prior else "")
     )
     return 0
 
@@ -250,6 +275,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-rerank", action="store_true", help="skip the cross-encoder rerank pass"
     )
     search.set_defaults(func=_cmd_search)
+
+    triage = sub.add_parser("triage", help="classify an alert into a handling lane")
+    triage.add_argument("alert", help="alert text or an Alertmanager JSON payload")
+    triage.set_defaults(func=_cmd_triage)
 
     diagnose = sub.add_parser("diagnose", help="run the incident loop against a sim scenario")
     diagnose.add_argument("scenario", help="sim scenario name (see `runbook sim list`)")

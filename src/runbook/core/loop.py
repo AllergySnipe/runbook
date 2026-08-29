@@ -1,12 +1,14 @@
-"""The diagnosis loop: alert → retrieve runbook → tool-use investigation → grounded
-structured diagnosis.
+"""The diagnosis loop: triage → retrieve runbook → tool-use investigation →
+grounded structured diagnosis.
 
 Explicit and manual on purpose (ADR-0001, ADR-0005): the SDK's tool-runner is
-beta and hides the loop, and the loop is where the safety branches live. This
-slice has none of those branches yet — it stops at a *grounded proposal*. The
+beta and hides the loop, and the loop is where the safety branches live. First
+branch now in place: **triage** (`core/triage.py`) runs before retrieval —
+`noise-or-flapping` / `need-more-info` short-circuit with no diagnosis; a
+`novel-incident` proceeds but tells the model retrieval is low-prior. The
 approval gate (S1), the tool allowlist enforcement path (S2, already in
 `tools.run_tool`), the guardrail second pass, redaction (S5), and tracing are
-Week 2.
+still Week 2.
 
 Grounding (S3): after synthesis we check every remediation step quotes a line
 that actually appears in the retrieved runbook. This slice *flags* violations;
@@ -30,6 +32,7 @@ from ..prompts import load as load_prompt
 from ..rag import RetrievedChunk, retrieve
 from ..sim import load_scenario
 from ..tools import SCHEMAS, run_tool
+from .triage import TriageResult, triage
 
 MAX_ITERS = 8
 
@@ -74,7 +77,8 @@ class GroundingIssue:
 class DiagnoseResult:
     alert: str
     scenario: str
-    diagnosis: Diagnosis
+    triage: TriageResult
+    diagnosis: Diagnosis | None
     retrieved: list[RetrievedChunk]
     tool_calls: list[ToolCall]
     iterations: int
@@ -84,14 +88,22 @@ class DiagnoseResult:
     elapsed_s: float
 
     @property
+    def short_circuited(self) -> bool:
+        """Triage routed this to a non-loop lane (`noise-or-flapping` /
+        `need-more-info`). No diagnosis was produced."""
+        return self.diagnosis is None
+
+    @property
     def grounded(self) -> bool:
         """A proposal with steps, all of which cite a real runbook line. No steps
         means "escalate to a human" — not grounded, but not a failure either."""
+        if self.diagnosis is None:
+            return False
         return bool(self.diagnosis.remediation_steps) and not self.grounding_issues
 
     @property
     def escalate(self) -> bool:
-        return not self.diagnosis.remediation_steps
+        return self.diagnosis is not None and not self.diagnosis.remediation_steps
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -185,6 +197,23 @@ async def diagnose(
 
     load_scenario(scenario_name)  # fail early on a bad scenario name
 
+    tri = await triage(alert)
+    if not tri.proceed:
+        # `noise-or-flapping` / `need-more-info` — don't spend a tool-loop.
+        return DiagnoseResult(
+            alert=alert,
+            scenario=scenario_name,
+            triage=tri,
+            diagnosis=None,
+            retrieved=[],
+            tool_calls=[],
+            iterations=0,
+            hit_max_iters=False,
+            grounding_issues=[],
+            usage={"input_tokens": 0, "output_tokens": 0},
+            elapsed_s=round(time.monotonic() - started, 1),
+        )
+
     retrieved = await asyncio.to_thread(retrieve, alert, k)
     if not retrieved:
         raise RuntimeError("retrieval returned nothing for this alert")
@@ -192,12 +221,21 @@ async def diagnose(
     runbook_text, runbook_source = _assemble_runbook(retrieved)
     system = load_prompt("diagnose", runbook_source=runbook_source, runbook_text=runbook_text)
 
+    low_prior_note = (
+        "\n\nNote: triage classified this as a *novel incident* — no runbook is "
+        "known to cover it. The retrieved runbook may be only loosely relevant; "
+        "weight your live tool evidence over it, and prefer escalation if the "
+        "evidence does not clearly fit."
+        if tri.low_prior
+        else ""
+    )
     messages: list[dict] = [
         {
             "role": "user",
             "content": (
                 f"Alert on `paymentsvc` (sim scenario `{scenario_name}`):\n\n{alert}\n\n"
                 "Investigate per the runbook and report what you find."
+                f"{low_prior_note}"
             ),
         }
     ]
@@ -253,6 +291,7 @@ async def diagnose(
     return DiagnoseResult(
         alert=alert,
         scenario=scenario_name,
+        triage=tri,
         diagnosis=diagnosis,
         retrieved=retrieved,
         tool_calls=tool_calls,
