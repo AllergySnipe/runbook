@@ -10,7 +10,7 @@ before any state-changing action.
 
 ## Status
 
-Week 0–1 done — FastAPI + Render deploy; Neon + `migrations/0001`–`0004`; `ingest/` (2102
+Week 0–1 done — FastAPI + Render deploy; Neon + `migrations/0001`–`0005`; `ingest/` (2102
 chunks) + local `embed.py` (ADR-0002); `rag/` hybrid retrieve + rerank (ADR-0003); `sim/`
 fixture env + 7 scenarios + `tools.py` 4 read-only tools + allowlist (ADR-0004); `core/loop.py`
 manual tool-use loop → structured `Diagnosis` (ADR-0005).
@@ -23,16 +23,37 @@ independent action classification + tighten-only 2nd pass → `disposition`), `c
 hard S1–S3 + soft metrics + reference LLM-judge, real `diagnose()` never persisted, `baseline.json`
 regression gate; `runbook eval`). Deterministic CI (`.github/workflows/ci.yml`).
 
-LLM provider = **OpenRouter free models** (ADR-0009). `llm.py` on the `openai` SDK: neutral
-`Turn`/`Usage`/`ToolRequest`, own 429/5xx retry, per-role model fallback chains
-(`extra_body.models`, capped at 3), `parse` via `create` + manual validation. Config chains
-(`config.py`): parse = `nvidia/nemotron-3-super-120b-a12b:free`, tool loop = `z-ai/glm-5.2:free`
-→ MiniMax, judge = GLM → nemotron. Blessed baseline: 30/30, deterministic metrics 1.00, judge
-0.91, hard checks clear. `OPENROUTER_API_KEY` in `.env` + Render. **HEAD `77ca91c` not pushed.**
+Dashboard (ADR-0010): `web_api.py` exposes the loop over HTTP + SSE — `POST /api/incidents`
+(fire-and-forget `asyncio` task, no job queue), `GET /api/incidents(+/{id})` (`?featured=1` =
+curated exemplars), SSE `/{id}/events` (replay-then-live, idempotent — deduped by stable key),
+`POST /{id}/approve|reject`, `GET /api/{scenarios,decisions,evals/baseline,runbooks?path=}`
+(`/runbooks` corpus-jailed). Progress via `diagnose(on_event=...)` → `core/events.py`
+(versioned; `None` for CLI/eval — baseline unaffected). In-memory `_RUNS` registry is the
+disposable live layer; Postgres is the record. `migrations/0005` = `incident_runs.featured`;
+`runbook feature <id>`.
 
-Not started: dashboard (`web/`, REST+SSE+React), incident memory, Langfuse tracing, redaction
-(S5). Nothing is executed on approval — no state-changing tools. `retrieve()` + tools are sync
-(via `asyncio.to_thread`). Check before assuming a module exists.
+`web/` = Vite + React + Tailwind + react-router (built to `web/dist/`, served by `app.py` as
+the SPA after the API). **Two registers, one token set** (`web/src/index.css`): editorial
+(`/`, `/how-it-works`, `/decisions` — Fraunces display, §-sections, Fig. captions) and console
+(`/incidents`, `/evals` — Plex Mono, dotted grid, `Panel` primitive, status LEDs, the live
+timeline as a `run.log` stream). `/incidents/:id` = the run anatomy: `components/evidence/*`
+render each tool result natively (metrics → hand-drawn SVG chart, logs → viewer, deploys →
+timeline, deps → health LEDs); `RunbookQuote` highlights a step's quote in the real runbook
+markdown. ~35-term inline glossary (`content/glossary.js`, `<Term>`). Dev: `uvicorn` +
+`cd web && npm run dev` (proxies `/api`). Dockerfile: `node:20` build stage + `COPY corpus/`.
+
+LLM layer = **OpenRouter** via the `openai` SDK (ADR-0009 — provider-neutral, per-role model
+routing with fallback chains). `llm.py`: neutral `Turn`/`Usage`/`ToolRequest`, own 429/5xx
+retry, `extra_body.models` chains (capped at 3), `parse` via `create` + manual validation.
+Config (`config.py`): parse = `nvidia/nemotron-3-super-120b-a12b:free`, tool loop =
+`z-ai/glm-5.2:free` → MiniMax, judge = GLM → nemotron (roster is cost-optimised; dedicated
+endpoints are a config swap). Blessed baseline: 30/30, deterministic metrics 1.00, judge 0.91,
+hard checks clear. `OPENROUTER_API_KEY` in `.env` + Render.
+
+Not started: incident memory, Langfuse tracing, redaction (S5). Nothing is executed on
+approval — no state-changing tools. The dashboard's post-resolution root-cause note is captured
+(`resolve_approvals(note=...)`) but not yet fed to a new eval case / incident memory. `retrieve()`
++ tools are sync (via `asyncio.to_thread`). Check before assuming a module exists.
 
 ## Golden rules
 
@@ -63,13 +84,13 @@ Not started: dashboard (`web/`, REST+SSE+React), incident memory, Langfuse traci
   does it cost" signal for the CLI phase.
 - **Docker** — single image; listens on `$PORT` (`8000` locally).
   Deploy: Render (Docker), `render.yaml` Blueprint, git-push-to-deploy on `main`.
-- Frontend: **Vite + React** in `web/`, built into `web/dist/`, served by FastAPI — Week 2.
-- Models: **OpenRouter** (OpenAI-compatible, SDK `openai` async), **free `:free` models** —
-  ADR-0009. Per-role chains (`config.py`): triage / structured-parse workhorse =
-  `nvidia/nemotron-3-super-120b-a12b:free` (reliably enforces `json_schema` on the free tier);
-  tool loop (`diagnosis_model`) = `z-ai/glm-5.2:free` → `loop_fallbacks` (MiniMax m3, m2.7);
-  eval judge = `z-ai/glm-5.2:free` → nemotron. `llm.py` is the one call site; it owns 429/5xx
-  retry (free tier = 20 req/min) and walks each chain via `extra_body.models`.
+- Frontend: **Vite + React + Tailwind + react-router** in `web/`, built into `web/dist/`,
+  served by FastAPI as the SPA (ADR-0010). Live run progress over **SSE**.
+- Models: **OpenRouter** (OpenAI-compatible, SDK `openai` async) — ADR-0009. Per-role chains
+  (`config.py`): triage / structured-parse workhorse = `nvidia/nemotron-3-super-120b-a12b:free`
+  (reliably enforces `json_schema`); tool loop (`diagnosis_model`) = `z-ai/glm-5.2:free` →
+  `loop_fallbacks` (MiniMax m3, m2.7); eval judge = `z-ai/glm-5.2:free` → nemotron. `llm.py` is
+  the one call site; it owns 429/5xx retry and walks each chain via `extra_body.models`.
 
 ## Layout
 
@@ -82,14 +103,17 @@ src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db
                    cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
                    rag/ (hybrid retrieve + rerank), sim/ (fixture env + scenarios/),
                    tools.py (read-only tools + schemas + allowlist),
-                   core/ (triage + loop + guardrail + store), prompts/ (versioned prompt files),
-                   evals/ (golden set + scorers + judge + runner + report + baseline.json)
+                   core/ (triage + loop + guardrail + store + events), prompts/ (versioned),
+                   evals/ (golden set + scorers + judge + runner + report + baseline.json),
+                   web_api.py (REST + SSE — the dashboard backend)
+web/               Vite + React + Tailwind SPA; `npm run build` → web/dist/ (served by app.py).
+                   src/{layouts,routes,components,content,lib}; components/evidence/ = native
+                   tool-result rendering; content/glossary.js = the inline <Term> glossary
 tests/             pytest — deterministic by default (no model calls, no secrets);
                    *_integration.py skip themselves without a configured database_url
 .github/workflows/ ci.yml — ruff + deterministic pytest on every push (no secrets)
-Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
+Dockerfile         node:20 build stage (web/dist) + python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
-(coming: web/)
 ```
 
 ## Commands
@@ -106,10 +130,14 @@ uv run runbook runs [--status S] [-n N]                 list recent incident run
 uv run runbook run <id>                                 show one run (the audit record)
 uv run runbook approve <id> [--step N] [--by NAME]      approve a run's pending state-changing steps
 uv run runbook reject <id> --note "why" [--by NAME]     reject a run (whole run → rejected)
+uv run runbook feature <id> [--unfeature]               mark a run as a curated dashboard exemplar
 uv run runbook sim <action> <scenario> [...]            inspect the sim (list|show|metrics|logs|deploys|deps)
 uv run runbook eval [--scenario N] [--no-judge] [-j N]  golden eval set → real loop → scorecard vs baseline
 uv run runbook eval --update-baseline                   on a clean run, re-bless evals/baseline.json
 uv run runbook eval --bless eval-results/<run>.json      bless a prior --json run without re-running
+
+cd web && npm install && npm run dev                    dashboard dev server (:5173, proxies /api → :8000)
+cd web && npm run build                                 build the SPA into web/dist/ (app.py then serves it)
 ```
 
 ## Conventions

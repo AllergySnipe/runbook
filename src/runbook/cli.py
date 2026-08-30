@@ -10,6 +10,7 @@ runbook runs [--status S] [-n N]         list recent incident runs
 runbook run <id>                         show one incident run (the audit record)
 runbook approve <id> [--step N] [--by]   approve a run's pending state-changing steps
 runbook reject <id> --note "why" [--by]  reject a run (whole run → rejected)
+runbook feature <id> [--unfeature]       mark a run as a curated dashboard exemplar
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
 runbook eval [--scenario N] [--no-judge]  run the golden eval set through the real loop
 """
@@ -281,6 +282,18 @@ def _cmd_reject(args: argparse.Namespace) -> int:
     return _resolve_run(args, "reject")
 
 
+def _cmd_feature(args: argparse.Namespace) -> int:
+    """Mark (or unmark) a run as a curated exemplar shown first on the dashboard."""
+    from .core import set_featured
+
+    on = not args.unfeature
+    if not set_featured(args.id, on):
+        print(f"no run {args.id!r}")
+        return 1
+    print(f"run {args.id}  ·  featured: {on}")
+    return 0
+
+
 def _cmd_eval(args: argparse.Namespace) -> int:
     """Run the golden eval set (`evals/cases.py`) through the real `diagnose()`
     path, score + judge each case, print a scorecard, compare to the baseline.
@@ -502,6 +515,11 @@ def build_parser() -> argparse.ArgumentParser:
     reject.add_argument("--by", help="who is rejecting (default: $USER)")
     reject.add_argument("--note", required=True, help="why — required")
     reject.set_defaults(func=_cmd_reject)
+
+    feature = sub.add_parser("feature", help="mark a run as a curated dashboard exemplar")
+    feature.add_argument("id", help="run id")
+    feature.add_argument("--unfeature", action="store_true", help="clear the flag instead")
+    feature.set_defaults(func=_cmd_feature)
 
     ev = sub.add_parser("eval", help="run the golden eval set through the real loop")
     ev.add_argument("--scenario", action="append", help="limit to a sim scenario (repeatable)")

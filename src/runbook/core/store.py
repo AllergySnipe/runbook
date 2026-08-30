@@ -103,6 +103,7 @@ class RunRecord:
     elapsed_s: float
     created_at: datetime
     resolved_at: datetime | None
+    featured: bool = False
     approvals: list[ApprovalRecord] = field(default_factory=list)
 
 
@@ -156,7 +157,7 @@ def _tool_calls_json(calls: list) -> list[dict]:
 _RUN_COLS = (
     "id, alert, scenario, triage_category, triage_rationale, triage_confidence, "
     "disposition, status, diagnosis, retrieved, tool_calls, guardrail, usage, "
-    "iterations, hit_max_iters, elapsed_s, created_at, resolved_at"
+    "iterations, hit_max_iters, elapsed_s, created_at, resolved_at, featured"
 )
 
 
@@ -180,6 +181,7 @@ def _row_to_record(row: tuple, approvals: list[tuple]) -> RunRecord:
         elapsed_s=float(row[15]),
         created_at=row[16],
         resolved_at=row[17],
+        featured=bool(row[18]),
         approvals=[
             ApprovalRecord(
                 id=a[0],
@@ -200,10 +202,13 @@ def _row_to_record(row: tuple, approvals: list[tuple]) -> RunRecord:
 # --- writes / reads --------------------------------------------------------
 
 
-def record_run(result: DiagnoseResult) -> RunRecord:
+def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecord:
     """Persist one `diagnose()` run. For a `needs-approval` disposition, also
-    write a `pending_approvals` row per state-changing step."""
-    run_id = "run_" + secrets.token_hex(4)
+    write a `pending_approvals` row per state-changing step.
+
+    `run_id` lets a caller pre-allocate the id (the dashboard returns it to the
+    client before the loop finishes); the CLI omits it and one is generated."""
+    run_id = run_id or "run_" + secrets.token_hex(4)
     d = result.diagnosis
     g = result.guardrail
 
@@ -279,17 +284,33 @@ def get_run(run_id: str) -> RunRecord | None:
     return _row_to_record(row, approvals)
 
 
-def list_runs(*, status: str | None = None, limit: int = 20) -> list[RunRecord]:
+def list_runs(
+    *, status: str | None = None, featured: bool | None = None, limit: int = 20
+) -> list[RunRecord]:
     q = f"select {_RUN_COLS} from incident_runs"
-    params: list = []
+    where, params = [], []
     if status:
-        q += " where status = %s"
+        where.append("status = %s")
         params.append(status)
+    if featured is not None:
+        where.append("featured = %s")
+        params.append(featured)
+    if where:
+        q += " where " + " and ".join(where)
     q += " order by created_at desc limit %s"
     params.append(limit)
     with connect() as conn:
         rows = conn.execute(q, params).fetchall()
     return [_row_to_record(r, []) for r in rows]
+
+
+def set_featured(run_id: str, on: bool) -> bool:
+    """Mark/unmark a run as a curated exemplar. Returns True if the run exists."""
+    with connect() as conn, conn.transaction():
+        n = conn.execute(
+            "update incident_runs set featured = %s where id = %s", (on, run_id)
+        ).rowcount
+    return n > 0
 
 
 def resolve_approvals(

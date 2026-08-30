@@ -1,3 +1,14 @@
+# --- frontend build --------------------------------------------------------
+# The Vite/React dashboard is compiled to static files here and copied into the
+# app image below, so prod ships one artifact and does no Node work at runtime.
+FROM node:20-slim AS frontend
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build   # → /web/dist
+
+# --- app ------------------------------------------------------------------
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -25,6 +36,14 @@ RUN uv sync --frozen --no-install-project
 COPY --chown=appuser src ./src
 COPY --chown=appuser README.md ./
 RUN uv sync --frozen
+
+# Read at runtime: docs/adr by GET /api/decisions; corpus/ by the grounding
+# hydration in core/loop.py and by GET /api/runbooks (quote highlighting).
+COPY --chown=appuser docs ./docs
+COPY --chown=appuser corpus ./corpus
+
+# The built dashboard. app.py serves it as the SPA when this directory exists.
+COPY --from=frontend --chown=appuser /web/dist ./web/dist
 
 # Bake the retrieval models into the image so prod does no download at runtime and
 # has no network dependency on the query path (ADR-0002 / ADR-0003). Model names
