@@ -80,6 +80,7 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     import asyncio
 
     from .core import diagnose
+    from .core.cost import estimate_cost
     from .sim import load_scenario
 
     sc = load_scenario(args.scenario)
@@ -157,6 +158,7 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     print(
         f"\n{result.iterations} turns · {result.usage['input_tokens']}in/"
         f"{result.usage['output_tokens']}out tokens · {result.elapsed_s}s"
+        f" · ~${estimate_cost(result.usage.get('by_model')):.4f} (est. at paid model prices)"
     )
     _persist_run(result)
     return 0
@@ -244,9 +246,15 @@ def _cmd_run_show(args: argparse.Namespace) -> int:
             note = f'  note: "{a.note}"' if a.note else ""
             print(f"    step {a.step_index + 1}: {a.state}{who}{note}")
             print(f"       {a.action}")
+    if r.usage.get("by_model"):
+        print("  cost by model (est. at paid prices):")
+        for name, u in r.usage["by_model"].items():
+            print(f"    {name:44.44s}  {u['input_tokens']}in/{u['output_tokens']}out")
     print(
         f"\n  {r.iterations} turns · {r.usage.get('input_tokens', 0)}in/"
         f"{r.usage.get('output_tokens', 0)}out · {r.elapsed_s}s"
+        f" · ~${r.cost_usd:.4f}"
+        + ("  · cache hit" if r.cache_hit else "")
         + (f"  ·  resolved {r.resolved_at:%Y-%m-%d %H:%M}" if r.resolved_at else "")
     )
     return 0

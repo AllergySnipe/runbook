@@ -31,13 +31,24 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel
 
 from ..db import connect
+from .cost import estimate_cost
 
 if TYPE_CHECKING:
     from .loop import DiagnoseResult
 
-Status = Literal["short-circuited", "awaiting-approval", "resolved", "rejected", "escalated"]
+Status = Literal[
+    "running",  # web_api pre-persists a stub at kickoff so a crashed run still has a row
+    "short-circuited",
+    "awaiting-approval",
+    "resolved",
+    "rejected",
+    "escalated",
+    "failed",  # diagnose() raised — the stub was marked, not left dangling
+]
 
-TERMINAL: frozenset[str] = frozenset({"short-circuited", "resolved", "rejected", "escalated"})
+TERMINAL: frozenset[str] = frozenset(
+    {"short-circuited", "resolved", "rejected", "escalated", "failed"}
+)
 
 
 # --- pure lifecycle logic (no DB) ----------------------------------------------
@@ -105,6 +116,8 @@ class RunRecord:
     resolved_at: datetime | None
     featured: bool = False
     redactions: int = 0
+    cost_usd: float = 0.0  # est. $ at paid model prices (ADR-0014)
+    cache_hit: bool = False  # semantic cache served the triage + retrieval prefix
     approvals: list[ApprovalRecord] = field(default_factory=list)
 
 
@@ -158,7 +171,8 @@ def _tool_calls_json(calls: list) -> list[dict]:
 _RUN_COLS = (
     "id, alert, scenario, triage_category, triage_rationale, triage_confidence, "
     "disposition, status, diagnosis, retrieved, tool_calls, guardrail, usage, "
-    "iterations, hit_max_iters, elapsed_s, created_at, resolved_at, featured, redactions"
+    "iterations, hit_max_iters, elapsed_s, created_at, resolved_at, featured, redactions, "
+    "cost_usd, cache_hit"
 )
 
 
@@ -184,6 +198,8 @@ def _row_to_record(row: tuple, approvals: list[tuple]) -> RunRecord:
         resolved_at=row[17],
         featured=bool(row[18]),
         redactions=row[19] or 0,
+        cost_usd=float(row[20] or 0),
+        cache_hit=bool(row[21]),
         approvals=[
             ApprovalRecord(
                 id=a[0],
@@ -204,12 +220,43 @@ def _row_to_record(row: tuple, approvals: list[tuple]) -> RunRecord:
 # --- writes / reads --------------------------------------------------------
 
 
+def record_run_start(run_id: str, alert: str, scenario: str) -> None:
+    """Write a `status='running'` stub the moment a dashboard run is kicked off,
+    so a run that crashes mid-loop still has a row (and doesn't 404 the UI).
+    `record_run` upserts the real data over it; `mark_run_failed` marks it on a
+    crash. No-op on id conflict — a retry of the same id keeps the first stub."""
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            """
+            insert into incident_runs (id, alert, scenario, triage_category,
+                triage_rationale, triage_confidence, status)
+            values (%s, %s, %s, '', '', '', 'running')
+            on conflict (id) do nothing
+            """,
+            (run_id, alert, scenario),
+        )
+
+
+def mark_run_failed(run_id: str, error: str) -> None:
+    """Move a `running` stub to `failed` with the error text (truncated). Only
+    touches a non-terminal row, so it can't clobber a run that actually finished."""
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            "update incident_runs set status = 'failed', "
+            "diagnosis = jsonb_build_object('error', %s::text), resolved_at = now() "
+            "where id = %s and status not in "
+            "('resolved', 'rejected', 'escalated', 'short-circuited')",
+            (error[:500], run_id),
+        )
+
+
 def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecord:
     """Persist one `diagnose()` run. For a `needs-approval` disposition, also
     write a `pending_approvals` row per state-changing step.
 
     `run_id` lets a caller pre-allocate the id (the dashboard returns it to the
-    client before the loop finishes); the CLI omits it and one is generated."""
+    client before the loop finishes); the CLI omits it and one is generated.
+    Upserts, so it overwrites a `record_run_start` stub for the same id."""
     run_id = run_id or "run_" + secrets.token_hex(4)
     d = result.diagnosis
     g = result.guardrail
@@ -220,6 +267,7 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
         else []
     )
     status = compute_status(result.disposition, ["pending"] * len(gated))
+    cost_usd = estimate_cost(result.usage.get("by_model"))
 
     with connect() as conn, conn.transaction():
         conn.execute(
@@ -227,12 +275,26 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
             insert into incident_runs (
                 id, alert, scenario, triage_category, triage_rationale, triage_confidence,
                 disposition, status, diagnosis, retrieved, tool_calls, guardrail,
-                usage, iterations, hit_max_iters, elapsed_s, redactions, resolved_at
+                usage, iterations, hit_max_iters, elapsed_s, redactions, cost_usd,
+                cache_hit, resolved_at
             ) values (
                 %s, %s, %s, %s, %s, %s,
                 %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
-                %s::jsonb, %s, %s, %s, %s, {"now()" if status in TERMINAL else "null"}
+                %s::jsonb, %s, %s, %s, %s, %s,
+                %s, {"now()" if status in TERMINAL else "null"}
             )
+            on conflict (id) do update set
+                alert = excluded.alert, scenario = excluded.scenario,
+                triage_category = excluded.triage_category,
+                triage_rationale = excluded.triage_rationale,
+                triage_confidence = excluded.triage_confidence,
+                disposition = excluded.disposition, status = excluded.status,
+                diagnosis = excluded.diagnosis, retrieved = excluded.retrieved,
+                tool_calls = excluded.tool_calls, guardrail = excluded.guardrail,
+                usage = excluded.usage, iterations = excluded.iterations,
+                hit_max_iters = excluded.hit_max_iters, elapsed_s = excluded.elapsed_s,
+                redactions = excluded.redactions, cost_usd = excluded.cost_usd,
+                cache_hit = excluded.cache_hit, resolved_at = excluded.resolved_at
             """,
             (
                 run_id,
@@ -252,6 +314,8 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
                 result.hit_max_iters,
                 result.elapsed_s,
                 result.redaction_count,
+                cost_usd,
+                result.cache_hit,
             ),
         )
         for v in gated:
@@ -262,6 +326,7 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
                 insert into pending_approvals
                     (run_id, step_index, action, runbook_quote, classifier_reason)
                 values (%s, %s, %s, %s, %s)
+                on conflict (run_id, step_index) do nothing
                 """,
                 (run_id, v.step_index, step.action, step.runbook_quote, v.reason),
             )
@@ -305,6 +370,42 @@ def list_runs(
     with connect() as conn:
         rows = conn.execute(q, params).fetchall()
     return [_row_to_record(r, []) for r in rows]
+
+
+def run_stats(limit: int = 50) -> dict:
+    """Latency + cost aggregates over the most recent `limit` completed runs —
+    feeds the dashboard's stat row. Percentiles, not the mean: LLM latency is
+    right-skewed, so p50/p95 describe an actual run and the mean doesn't (ADR-0014)."""
+    with connect() as conn:
+        row = conn.execute(
+            """
+            with recent as (
+                select elapsed_s, cost_usd, cache_hit
+                from incident_runs
+                where status in ('resolved', 'rejected', 'escalated', 'awaiting-approval')
+                order by created_at desc
+                limit %s
+            )
+            select
+                count(*),
+                percentile_cont(0.5)  within group (order by elapsed_s),
+                percentile_cont(0.95) within group (order by elapsed_s),
+                percentile_cont(0.5)  within group (order by cost_usd),
+                avg(cost_usd),
+                avg(case when cache_hit then 1.0 else 0.0 end)
+            from recent
+            """,
+            (limit,),
+        ).fetchone()
+    n = row[0] or 0
+    return {
+        "n": n,
+        "latency_p50_s": round(float(row[1]), 1) if row[1] is not None else None,
+        "latency_p95_s": round(float(row[2]), 1) if row[2] is not None else None,
+        "cost_p50_usd": round(float(row[3]), 6) if row[3] is not None else None,
+        "cost_mean_usd": round(float(row[4]), 6) if row[4] is not None else None,
+        "cache_hit_rate": round(float(row[5]), 3) if row[5] is not None else None,
+    }
 
 
 def set_featured(run_id: str, on: bool) -> bool:

@@ -87,6 +87,8 @@ def _wire(monkeypatch):
     web_api._RUNS.clear()
     monkeypatch.setattr(web_api, "diagnose", fake_diagnose)
     monkeypatch.setattr(web_api, "record_run", lambda result, *, run_id: fake_run(run_id))
+    monkeypatch.setattr(web_api, "record_run_start", lambda *a, **k: None)
+    monkeypatch.setattr(web_api, "mark_run_failed", lambda *a, **k: None)
     monkeypatch.setattr(web_api, "list_runs", lambda **kw: [])
     yield
     web_api._RUNS.clear()
@@ -144,6 +146,44 @@ def test_get_incident_after_finish_returns_persisted_record(monkeypatch):
     resp = client.get(f"/api/incidents/{run_id}")
     assert resp.status_code == 200
     assert resp.json()["status"] == "awaiting-approval"
+
+
+def test_run_that_crashes_is_marked_failed_not_dropped(monkeypatch):
+    """The persist-at-start fix: a `diagnose()` exception writes `status=failed`
+    via `mark_run_failed` instead of leaving no row (dashboard 404)."""
+
+    async def boom(*a, **k):
+        raise RuntimeError("provider exploded")
+
+    marked = {}
+    monkeypatch.setattr(web_api, "diagnose", boom)
+    monkeypatch.setattr(web_api, "mark_run_failed", lambda rid, err: marked.update(id=rid, err=err))
+
+    run_id = client.post(
+        "/api/incidents", json={"scenario": "db-connection-pool-exhaustion"}
+    ).json()["id"]
+    names = _drain_sse(run_id)
+    assert names[-1] == ev.ERROR
+    assert marked["id"] == run_id
+    assert "provider exploded" in marked["err"]
+
+
+def test_stats_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        web_api,
+        "run_stats",
+        lambda limit=50: {
+            "n": 12,
+            "latency_p50_s": 24.0,
+            "latency_p95_s": 71.0,
+            "cost_p50_usd": 0.0031,
+            "cost_mean_usd": 0.0044,
+            "cache_hit_rate": 0.25,
+        },
+    )
+    resp = client.get("/api/stats")
+    assert resp.status_code == 200
+    assert resp.json()["latency_p95_s"] == 71.0
 
 
 def test_list_merges_in_flight_runs():

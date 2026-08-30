@@ -13,8 +13,11 @@ from .store import (
     compute_status,
     get_run,
     list_runs,
+    mark_run_failed,
     record_run,
+    record_run_start,
     resolve_approvals,
+    run_stats,
     set_featured,
 )
 from .triage import TriageResult, triage
@@ -35,8 +38,11 @@ __all__ = [
     "diagnose",
     "get_run",
     "list_runs",
+    "mark_run_failed",
     "record_run",
+    "record_run_start",
     "resolve_approvals",
+    "run_stats",
     "set_featured",
     "triage",
 ]

@@ -142,6 +142,18 @@ class DiagnoseResult:
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _route_loop_model(tri: TriageResult, settings) -> tuple[str, list[str]]:
+    """Pick the tool-loop model + fallback chain from the triage verdict.
+
+    A `known-runbook` alert the classifier is *sure* about has an unambiguous
+    runbook to follow — the cheaper/faster chain handles it. Novel incidents and
+    anything the classifier hedged on keep the full-strength chain. Latent on the
+    free tier (all $0) — see ADR-0014."""
+    if settings.routing_enabled and tri.category == "known-runbook" and tri.confidence == "high":
+        return settings.fast_loop_model, settings.fast_loop_fallbacks
+    return settings.diagnosis_model, settings.loop_fallbacks
+
+
 def _normalise(text: str) -> str:
     """Loose normalisation for provenance matching: fold everything that isn't a
     letter or digit to a single space. Survives the model reformatting a runbook
@@ -251,9 +263,9 @@ async def diagnose(
     """
     started = time.monotonic()
     settings = get_settings()
-    model = settings.diagnosis_model
-    loop_fallbacks = settings.loop_fallbacks
     structured_fallbacks = settings.structured_fallbacks
+    # the tool-loop model + its fallback chain are chosen from the triage verdict
+    # once it's known (difficulty routing, ADR-0014) — see `_route_loop_model`.
 
     emit: Callable[[Event], None] = on_event or (lambda _e: None)
 
@@ -323,7 +335,7 @@ async def diagnose(
                 iterations=0,
                 hit_max_iters=False,
                 grounding_issues=[],
-                usage={"input_tokens": 0, "output_tokens": 0},
+                usage={"input_tokens": 0, "output_tokens": 0, "by_model": {}},
                 elapsed_s=round(time.monotonic() - started, 1),
             )
 
@@ -348,6 +360,11 @@ async def diagnose(
                 retrieved=retrieved,
                 run_id=None,
             )
+
+    # difficulty routing (ADR-0014): a high-confidence known runbook doesn't need
+    # the strongest agentic model for the tool loop. `usage.by_model` records
+    # which model actually served — that's how the routing shows up in the audit.
+    model, loop_fallbacks = _route_loop_model(tri, settings)
 
     runbook_text, runbook_source = _assemble_runbook(retrieved)
     # S5 ∩ S3 (ADR-0011): scrub the runbook before it goes in the prompt, then
@@ -378,17 +395,26 @@ async def diagnose(
 
     tool_calls: list[ToolCall] = []
     redactions: list[RedactionSpan] = []
-    usage = {"input_tokens": 0, "output_tokens": 0}
+    # flat totals (kept for the 15 pre-existing prod rows + the eval baseline) plus
+    # a per-model breakdown for `$/incident` (ADR-0014). `_account` writes both.
+    usage: dict = {"input_tokens": 0, "output_tokens": 0, "by_model": {}}
     iterations = 0
     hit_max = False
+
+    def _account(u: llm.Usage) -> None:
+        usage["input_tokens"] += u.input_tokens
+        usage["output_tokens"] += u.output_tokens
+        key = u.model or model  # provider didn't echo one → attribute to what we asked for
+        slot = usage["by_model"].setdefault(key, {"input_tokens": 0, "output_tokens": 0})
+        slot["input_tokens"] += u.input_tokens
+        slot["output_tokens"] += u.output_tokens
 
     while True:
         iterations += 1
         turn = await llm.run_turn(
             messages, model=model, system=system, tools=SCHEMAS, fallbacks=loop_fallbacks
         )
-        usage["input_tokens"] += turn.usage.input_tokens
-        usage["output_tokens"] += turn.usage.output_tokens
+        _account(turn.usage)
         messages.append(turn.assistant_message)
 
         if turn.stop_reason == "tool_calls" and turn.tool_requests:
@@ -418,10 +444,6 @@ async def diagnose(
                 kinds=dict(Counter(s.kind for s in redactions)),
             )
         )
-
-    def _account(u) -> None:
-        usage["input_tokens"] += u.input_tokens
-        usage["output_tokens"] += u.output_tokens
 
     def _synthesis_failed() -> DiagnoseResult:
         """The synthesis call produced no parseable structured output (a refusal,

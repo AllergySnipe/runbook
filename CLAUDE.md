@@ -21,13 +21,22 @@ Deterministic CI.
 models** — embeddings + reranking on **Jina** (`src/runbook/jina.py`, one call site; ADR-0013
 supersedes the local-model parts of 0002/0003), `jina-embeddings-v5-text-small` (1024-dim) +
 `jina-reranker-v2-base-multilingual`. `migrations/0007` → `vector(1024)`, corpus re-embedded.
-Container ~476 MB → ~90 MB; needs `JINA_API_KEY`. **Verified on prod** (`run_49b3e90b`,
-retrieval + loop clean). `test_jina.py` mocks it; live retrieval tests `skipif` no real key.
+Container ~476 MB → ~90 MB; needs `JINA_API_KEY`. **Verified on prod** (`run_49b3e90b`).
+· **semantic cache + `$/incident` + routing** (ADR-0014): `alert_cache` (`migrations/0008`,
+`vector(1024)`) — a near-duplicate proceeding alert within 0.97 cosine + 1 h TTL reuses the
+triage + retrieval prefix (never the diagnosis); `core/cache.py`, opt-in via
+`diagnose(use_cache=)` (CLI + dashboard yes, evals/red-team no). Alert embedding computed
+once, reused for the lookup + the retrieval vector leg. `llm.Usage.model` (served model, per
+the fallback chain) → `usage["by_model"]` → `core/cost.py` `$/incident` at paid list prices →
+`incident_runs.cost_usd` (`migrations/0009`) + `GET /api/stats` (p50/p95 latency, cache-hit
+rate). `_route_loop_model`: confident `known-runbook` → cheaper loop chain (payoff latent on
+the free tier). Persist-at-start fix: `record_run_start` stub + `mark_run_failed` — a crashed
+dashboard run is `failed`, not a 404. `record_run` is now an upsert.
 
-**Week 3 not started:** model routing + semantic cache + `$/incident` (slice 3) · incident
-memory + red-team→eval flywheel · Langfuse tracing · `/security` dashboard page. Nothing
-executes on approval — no state-changing tools. `retrieve()` + tools are sync (blocking HTTP
-now runs inside, but only via `asyncio.to_thread` / the CLI). Check before assuming a module exists.
+**Week 3 not started:** incident memory + red-team→eval flywheel · Langfuse tracing ·
+`/security` dashboard page. Nothing executes on approval — no state-changing tools.
+`retrieve()` + tools + `cache.py` are sync (blocking HTTP runs inside, only via
+`asyncio.to_thread` / the CLI). Check before assuming a module exists.
 
 ## Golden rules
 

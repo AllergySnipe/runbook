@@ -47,6 +47,8 @@ single team / single tenant.**
   infrastructure**.
 - Triage router, retrieval (hybrid search + rerank), agentic tool loop, guardrail layer,
   approval gate.
+- Semantic cache: a near-duplicate alert reuses a recent run's triage + retrieval prefix
+  (never its diagnosis) within a similarity + TTL gate. Difficulty routing for the loop model.
 - Incident memory: append-only timeline + similar-incident retrieval.
 - Eval suite (golden scenarios + scorers) wired into CI.
 - Langfuse tracing + online scoring on sampled runs.

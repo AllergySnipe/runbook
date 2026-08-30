@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Check, X } from "lucide-react";
 import { getIncident, openEventStream } from "../api.js";
 import { buildTimeline, eventKey, isTerminal, fmtElapsed } from "../lib/timeline.js";
-import { fmtTime, fmtDuration, fmtTokens } from "../lib/format.js";
+import { fmtTime, fmtDuration, fmtTokens, fmtUSD } from "../lib/format.js";
 import { StatusPill, Stat, StatRow, Term, Panel } from "../components/ui.jsx";
 import { SCENARIO_COPY } from "../content/scenarios.js";
 import Proposal from "../components/Proposal.jsx";
@@ -110,6 +110,10 @@ export default function IncidentDetail() {
                 value={`${fmtTokens(rec.usage?.input_tokens)}/${fmtTokens(rec.usage?.output_tokens)}`}
                 sub="in / out"
               />
+              <Stat label="est. cost" value={fmtUSD(rec.cost_usd)} sub="at paid prices" />
+              {rec.cache_hit && (
+                <Stat label="cache" value="hit" sub="triage + retrieval reused" />
+              )}
               {rec.diagnosis && <Stat label="confidence" value={rec.diagnosis.confidence} />}
               {rec.redactions > 0 && (
                 <Stat label="redactions" value={rec.redactions} term="redaction" sub="tool output" />

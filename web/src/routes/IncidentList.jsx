@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Play, ChevronDown, Loader2 } from "lucide-react";
-import { StatusPill, Badge, Term, Panel } from "../components/ui.jsx";
-import { listIncidents, listScenarios, startIncident } from "../api.js";
-import { fmtTime, SEVERITY_TONE } from "../lib/format.js";
+import { StatusPill, Badge, Term, Panel, Stat, StatRow } from "../components/ui.jsx";
+import { listIncidents, listScenarios, startIncident, getStats } from "../api.js";
+import { fmtTime, fmtDuration, fmtUSD, SEVERITY_TONE } from "../lib/format.js";
 import { SCENARIO_COPY } from "../content/scenarios.js";
 
 const STATUSES = ["awaiting-approval", "resolved", "rejected", "escalated", "short-circuited"];
@@ -11,6 +11,7 @@ const STATUSES = ["awaiting-approval", "resolved", "rejected", "escalated", "sho
 export default function IncidentList() {
   const [rows, setRows] = useState([]);
   const [featured, setFeatured] = useState([]);
+  const [stats, setStats] = useState(null);
   const [filter, setFilter] = useState(null);
   const [err, setErr] = useState(null);
 
@@ -18,7 +19,11 @@ export default function IncidentList() {
   useEffect(() => {
     refresh();
     listIncidents({ featured: true }).then(setFeatured).catch(() => {});
-    const t = setInterval(refresh, 4000);
+    getStats().then(setStats).catch(() => {});
+    const t = setInterval(() => {
+      refresh();
+      getStats().then(setStats).catch(() => {});
+    }, 4000);
     return () => clearInterval(t);
   }, []);
 
@@ -33,6 +38,19 @@ export default function IncidentList() {
           watch the loop work in real time, or open a past run to inspect its full audit record.
         </p>
       </header>
+
+      {stats?.n > 0 && (
+        <StatRow>
+          <Stat label="p50 latency" value={fmtDuration(stats.latency_p50_s)} sub="median run" />
+          <Stat label="p95 latency" value={fmtDuration(stats.latency_p95_s)} sub="tail" />
+          <Stat label="median $/incident" value={fmtUSD(stats.cost_p50_usd)} sub="at paid prices" />
+          <Stat
+            label="cache hit rate"
+            value={stats.cache_hit_rate == null ? "—" : `${Math.round(stats.cache_hit_rate * 100)}%`}
+            sub={`last ${stats.n} runs`}
+          />
+        </StatRow>
+      )}
 
       {featured.length > 0 && <Featured runs={featured} />}
 

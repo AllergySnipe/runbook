@@ -26,6 +26,8 @@ export const listDecisions = () => fetch("/api/decisions").then(json);
 
 export const getEvalBaseline = () => fetch("/api/evals/baseline").then(json);
 
+export const getStats = () => fetch("/api/stats").then(json);
+
 export const getRunbook = (path) =>
   fetch(`/api/runbooks?path=${encodeURIComponent(path)}`).then(json);
 

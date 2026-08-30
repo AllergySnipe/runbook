@@ -6,15 +6,13 @@ Things we've deliberately decided to do *later*, so they don't clog the current 
   every 10 min. GitHub cron is unreliable (late, pauses after 60d idle); add an external
   monitor (UptimeRobot / cron-job.org) if the cold start still bites.
 
-- **Persist the run row at *start*, not just on success** — `web_api.py::_run_incident` only
-  calls `record_run` if `diagnose()` returns; any exception publishes an SSE `error` event
-  and the run vanishes (no DB row → dashboard 404). Write a row at kickoff and set a
-  `failed` status + reason in the `except`. Surfaced while debugging the free-tier OOM 502s.
+- ~~**Persist the run row at *start*, not just on success**~~ — done (ADR-0014):
+  `web_api.py::_run_incident` writes a `record_run_start` stub before the loop, and the
+  `except` calls `mark_run_failed` (→ `status='failed'` + error text). `record_run` upserts
+  over the stub. A crashed dashboard run no longer 404s.
 
-- **Cache the query embedding** — every `retrieve()` now makes a Jina embedding call for the
-  alert (ADR-0013). The Week 3 semantic-cache slice keys on exactly this vector, so fold the
-  two together: compute the alert embedding once, reuse for both the cache lookup and the
-  vector-search leg.
+- ~~**Cache the query embedding**~~ — done (ADR-0014): `diagnose()` computes the alert
+  embedding once and passes it to both `cache.lookup` and `retrieve(query_vec=)`.
 
 - **`/security` dashboard page** — surface the red-team ASR table (baseline vs hardened) and
   the attack families on the console, alongside `/evals`. The data is in

@@ -38,8 +38,8 @@ def _chunk() -> RetrievedChunk:
     )
 
 
-def _usage(i=10, o=5):
-    return SimpleNamespace(input_tokens=i, output_tokens=o)
+def _usage(i=10, o=5, model="fake/parse-model"):
+    return SimpleNamespace(input_tokens=i, output_tokens=o, model=model)
 
 
 def _text_block(text: str) -> dict:
@@ -501,6 +501,46 @@ def test_cache_not_stored_on_a_short_circuit(monkeypatch):
         store_sink=sink,
     )
     assert sink == []
+
+
+@pytest.mark.parametrize(
+    "category, confidence, expect_fast",
+    [
+        ("known-runbook", "high", True),
+        ("known-runbook", "medium", False),
+        ("known-runbook", "low", False),
+        ("novel-incident", "high", False),
+    ],
+)
+def test_route_loop_model_picks_fast_chain_only_for_confident_known(
+    category, confidence, expect_fast
+):
+    from runbook.config import get_settings
+
+    s = get_settings()
+    tri = diag.TriageResult(category=category, rationale="x", confidence=confidence)
+    model, fallbacks = diag._route_loop_model(tri, s)
+    if expect_fast:
+        assert model == s.fast_loop_model and fallbacks == s.fast_loop_fallbacks
+    else:
+        assert model == s.diagnosis_model and fallbacks == s.loop_fallbacks
+
+
+def test_by_model_accounting_splits_tokens_across_models(monkeypatch):
+    """Cost attribution: tool-loop tokens (fake run_turn, no model echoed → keyed
+    to the routed model) are tracked apart from synthesis + second-pass tokens
+    (fake parse model), and the per-model totals reconcile with the flat total."""
+    from runbook.config import get_settings
+
+    turns = [("end_turn", [_text_block("done")])]
+    result = _run(monkeypatch, turns=turns, diagnosis=_readonly_diagnosis())
+
+    by = result.usage["by_model"]
+    routed = get_settings().fast_loop_model  # known-runbook + high confidence
+    assert by[routed] == {"input_tokens": 10, "output_tokens": 5}  # one loop turn
+    assert by["fake/parse-model"]["input_tokens"] == 100 + 15  # synthesis + 2nd pass
+    assert sum(m["input_tokens"] for m in by.values()) == result.usage["input_tokens"]
+    assert sum(m["output_tokens"] for m in by.values()) == result.usage["output_tokens"]
 
 
 def test_check_grounding_normalises_whitespace_and_case():

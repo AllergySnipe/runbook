@@ -32,7 +32,16 @@ from pydantic import BaseModel
 from .core import events as ev
 from .core.events import Event
 from .core.loop import diagnose
-from .core.store import RunRecord, get_run, list_runs, record_run, resolve_approvals
+from .core.store import (
+    RunRecord,
+    get_run,
+    list_runs,
+    mark_run_failed,
+    record_run,
+    record_run_start,
+    resolve_approvals,
+    run_stats,
+)
 from .sim import load_scenario
 
 log = logging.getLogger("runbook.web")
@@ -83,7 +92,15 @@ def _evict() -> None:
 
 
 async def _run_incident(run: IncidentRun, k: int) -> None:
-    """Fire-and-forget: run the loop, persist the result, narrate the outcome."""
+    """Fire-and-forget: run the loop, persist the result, narrate the outcome.
+
+    A stub row is written before the loop starts so a crash mid-run still leaves a
+    durable record (`status='failed'`) instead of a dashboard 404."""
+    try:
+        await asyncio.to_thread(record_run_start, run.id, run.alert, run.scenario)
+    except Exception:
+        log.exception("could not pre-persist incident %s", run.id)
+
     try:
         result = await diagnose(run.alert, run.scenario, k=k, on_event=run.publish, use_cache=True)
         rec = await asyncio.to_thread(record_run, result, run_id=run.id)
@@ -92,6 +109,10 @@ async def _run_incident(run: IncidentRun, k: int) -> None:
         raise
     except Exception as exc:  # fire-and-forget: narrate the failure, never crash the server
         log.exception("incident %s failed", run.id)
+        try:
+            await asyncio.to_thread(mark_run_failed, run.id, str(exc))
+        except Exception:
+            log.exception("could not mark incident %s failed", run.id)
         run.publish(ev.event(ev.ERROR, message=str(exc)))
     finally:
         run.finish()
@@ -162,6 +183,8 @@ async def list_incidents(
             "disposition": r.disposition,
             "status": r.status,
             "featured": r.featured,
+            "cost_usd": r.cost_usd,
+            "cache_hit": r.cache_hit,
             "created_at": r.created_at.isoformat(),
         }
         for r in rows
@@ -183,6 +206,13 @@ async def list_incidents(
         if not r.done and r.id not in persisted_ids and (status in (None, "running"))
     ]
     return live + persisted
+
+
+@router.get("/stats")
+async def stats(limit: int = 50) -> dict:
+    """Latency (p50/p95), $/incident, and cache-hit rate over recent completed
+    runs — the dashboard's operational stat row (ADR-0014)."""
+    return await asyncio.to_thread(run_stats, limit)
 
 
 @router.get("/incidents/{run_id}")

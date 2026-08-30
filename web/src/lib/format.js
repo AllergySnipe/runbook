@@ -23,4 +23,13 @@ export const fmtTokens = (n) => {
   return `${(n / 1000).toFixed(1)}k`;
 };
 
+// Sub-cent estimates — show enough digits to be meaningful ($0.0043), not $0.00.
+export const fmtUSD = (n) => {
+  if (n == null) return "—";
+  if (n === 0) return "$0";
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  if (n < 1) return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(2)}`;
+};
+
 export const SEVERITY_TONE = { SEV1: "critical", SEV2: "serious", SEV3: "warn" };

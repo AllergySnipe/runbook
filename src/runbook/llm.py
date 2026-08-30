@@ -50,6 +50,10 @@ class LLMParseError(RuntimeError):
 class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
+    # the model that actually served the call (OpenRouter's echoed `resp.model`) —
+    # not always the one requested, since the fallback chain may have walked past
+    # it. `core/loop.py` attributes cost per this. See `core/cost.py`.
+    model: str = ""
 
 
 @dataclass
@@ -109,13 +113,19 @@ def _redact_outgoing(messages: list[dict]) -> list[dict]:
     return out
 
 
-def _usage(u: object | None) -> Usage:
+def _usage(u: object | None, model: str = "") -> Usage:
     if u is None:
-        return Usage()
+        return Usage(model=model)
     return Usage(
         input_tokens=getattr(u, "prompt_tokens", 0) or 0,
         output_tokens=getattr(u, "completion_tokens", 0) or 0,
+        model=model,
     )
+
+
+def _served_model(resp: object) -> str:
+    """The model OpenRouter actually routed to, for cost attribution."""
+    return (getattr(resp, "model", "") or "").strip()
 
 
 def _norm_finish(reason: str | None) -> Literal["tool_calls", "stop", "length", "other"]:
@@ -252,7 +262,7 @@ async def run_turn(
         text=msg.content or "",
         tool_requests=requests,
         stop_reason=_norm_finish(choice.finish_reason),
-        usage=_usage(resp.usage),
+        usage=_usage(resp.usage, _served_model(resp)),
         assistant_message=assistant_message,
     )
 
@@ -320,7 +330,7 @@ async def parse[M: BaseModel](
             last_reason = "empty response (likely truncated on reasoning)"
         else:
             try:
-                return schema.model_validate_json(content), _usage(resp.usage)
+                return schema.model_validate_json(content), _usage(resp.usage, _served_model(resp))
             except ValidationError as exc:
                 last_reason = f"off-schema output ({str(exc)[:200]})"
 

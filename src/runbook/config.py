@@ -86,6 +86,16 @@ class Settings(BaseSettings):
     judge_model: str = "z-ai/glm-5.2:free"  # a different family from the usual synthesis server
     judge_fallbacks: list[str] = ["nvidia/nemotron-3-super-120b-a12b:free"]
 
+    # Difficulty routing (ADR-0014). A high-confidence `known-runbook` alert has an
+    # unambiguous runbook to follow — it doesn't need the strongest agentic model
+    # for the tool loop. Anything else (novel, low-confidence) keeps the full
+    # `diagnosis_model` chain. The cost/latency payoff is LATENT on the free tier
+    # (every model bills $0, latency is dominated by 429s) — this is policy +
+    # plumbing now, a real lever once there's a paid tier or a local model.
+    routing_enabled: bool = True
+    fast_loop_model: str = "minimax/minimax-m3:free"
+    fast_loop_fallbacks: list[str] = ["minimax/minimax-m2.7:free", "z-ai/glm-5.2:free"]
+
 
 @lru_cache
 def get_settings() -> Settings:
