@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     # LLM provider — OpenRouter (OpenAI-compatible), free models (ADR-0009).
     openrouter_api_key: str
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Retrieval provider — Jina (embeddings + reranking), hosted (ADR-0013,
+    # superseding the local-model parts of ADR-0002/0003). New key: 10M free
+    # tokens, no card. `src/runbook/jina.py` is the one call site.
+    jina_api_key: str
+    jina_base_url: str = "https://api.jina.ai/v1"
     # OpenRouter attribution headers (optional; show up on the OpenRouter dashboard).
     openrouter_referer: str = "https://github.com/nudgethink/runbook"
     openrouter_title: str = "Runbook"
@@ -33,14 +38,16 @@ class Settings(BaseSettings):
     database_url: str
     database_url_unpooled: str
 
-    # Embeddings (ADR-0002): local model via fastembed. Changing either value means
-    # a new migration for the vector dimension + a full re-embed.
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
-    embedding_dim: int = 384
+    # Embeddings (ADR-0002 → ADR-0013): hosted Jina model. Changing either value
+    # means a new migration for the vector dimension + a full re-embed
+    # (`runbook embed --all`) — corpus vectors and query vectors must share a model.
+    embedding_model: str = "jina-embeddings-v5-text-small"
+    embedding_dim: int = 1024
 
-    # Retrieval (ADR-0003): hybrid = pgvector + Postgres full-text, fused with RRF,
-    # then a cross-encoder rerank pass over the fused shortlist.
-    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    # Retrieval (ADR-0003 → ADR-0013): hybrid = pgvector + Postgres full-text, fused
+    # with RRF, then a cross-encoder rerank pass (hosted Jina) over the shortlist.
+    # Bigger quality jump available via "jina-reranker-v3.5" at more tokens/call.
+    rerank_model: str = "jina-reranker-v2-base-multilingual"
     retrieve_candidates: int = 30  # per-list depth pulled before fusion / rerank
     rerank_enabled: bool = True
 

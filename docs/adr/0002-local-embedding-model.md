@@ -1,6 +1,9 @@
 # ADR 0002 — Local embedding model (BGE-small via fastembed)
 
-- **Status:** Accepted
+- **Status:** Accepted; **superseded in part by [ADR-0013](0013-hosted-retrieval-models.md)**
+  (2026-08-30) — the embedding model moved from local `fastembed`/`bge-small` to
+  hosted `jina-embeddings-v5-text-small`. The `embed.py` seam, the 384→1024 dim
+  coupling, and the BGE reasoning below are the history that led there.
 - **Date:** 2026-08-28
 - **Deciders:** Ritvik
 - **Supersedes:** —

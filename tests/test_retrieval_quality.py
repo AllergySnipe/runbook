@@ -1,8 +1,8 @@
 """Retrieval-quality gate for the hybrid-search slice.
 
-Runs the real `retrieve()` path against Neon, so it needs `DATABASE_URL` and
-downloads the embedding + rerank models on first run. Skipped otherwise (CI
-without a DB, offline unit runs).
+Runs the real `retrieve()` path against Neon, so it needs `DATABASE_URL` and a
+real `JINA_API_KEY` (hosted embeddings + rerank, ADR-0013). Skipped otherwise
+(CI without secrets, offline unit runs).
 
 Each case is a paraphrased alert — deliberately *not* the runbook's title — and
 must surface its own runbook in the top 3 (`SPEC.md`: hit@3 ≥ 0.85; synthetic
@@ -14,17 +14,20 @@ import os
 import pytest
 
 
-def _has_db() -> bool:
+def _ready() -> bool:
     try:
         from runbook.config import get_settings
 
-        return bool(get_settings().database_url)
-    except Exception:  # noqa: BLE001 - any config failure means "no DB, skip"
+        s = get_settings()
+        return (
+            bool(s.database_url) and bool(s.jina_api_key) and s.jina_api_key != "test-key-not-real"
+        )
+    except Exception:  # noqa: BLE001 - any config failure means "not ready, skip"
         return False
 
 
 pytestmark = pytest.mark.skipif(
-    not _has_db(), reason="needs a configured database_url (real Neon retrieval)"
+    not _ready(), reason="needs DATABASE_URL + a real JINA_API_KEY (live Neon retrieval)"
 )
 
 # (paraphrased alert, expected runbook filename)

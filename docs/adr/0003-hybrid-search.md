@@ -1,6 +1,9 @@
 # ADR 0003 — Hybrid retrieval (vector + full-text + RRF + cross-encoder rerank)
 
-- **Status:** Accepted
+- **Status:** Accepted; **superseded in part by [ADR-0013](0013-hosted-retrieval-models.md)**
+  (2026-08-30) — the cross-encoder reranker moved from local `fastembed`/`ms-marco-MiniLM`
+  to hosted `jina-reranker-v2-base-multilingual`. The hybrid pipeline, RRF, and
+  the `retrieve()` contract are unchanged.
 - **Date:** 2026-08-28
 - **Deciders:** Ritvik
 - **Supersedes:** —

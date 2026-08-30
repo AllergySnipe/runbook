@@ -1,43 +1,26 @@
-"""The single embedding call site (ADR-0002).
+"""The single embedding call site (ADR-0002 → ADR-0013).
 
-Local `fastembed` model, loaded lazily and reused. Corpus chunks are embedded as
-passages; queries go through `embed_query`, which applies BGE's retrieval
-instruction. Vectors come back as plain lists so callers (and tests) don't need
-numpy.
+Hosted model via Jina (`jina.py`). Corpus chunks are embedded with the
+`retrieval.passage` task adapter; queries with `retrieval.query` — asymmetric
+search, the model encodes a short question differently from a long document.
+Vectors come back as plain lists so callers (and tests) don't need numpy.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from .config import get_settings
-
-_model = None  # fastembed.TextEmbedding, lazy
-
-# BGE v1.5 recommends this instruction on the *query* side of query→passage retrieval
-# (model card). fastembed does not apply it automatically for bge-small, so we do.
-_BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
-
-
-def _get_model():
-    global _model
-    if _model is None:
-        from fastembed import TextEmbedding
-
-        _model = TextEmbedding(model_name=get_settings().embedding_model)
-    return _model
+from . import jina
 
 
 def embed_passages(texts: Sequence[str]) -> list[list[float]]:
-    """Embed corpus chunks (no instruction prefix)."""
-    return [v.tolist() for v in _get_model().embed(list(texts))]
+    """Embed corpus chunks (indexing side)."""
+    return jina.embed(list(texts), task="retrieval.passage")
 
 
 def embed_query(text: str) -> list[float]:
-    """Embed a search query. For BGE models the retrieval instruction is prepended."""
-    if "bge" in get_settings().embedding_model.lower():
-        text = _BGE_QUERY_INSTRUCTION + text
-    return embed_passages([text])[0]
+    """Embed a search query (query side of asymmetric retrieval)."""
+    return jina.embed([text], task="retrieval.query")[0]
 
 
 def to_pgvector(vec: Iterable[float]) -> str:
@@ -45,8 +28,11 @@ def to_pgvector(vec: Iterable[float]) -> str:
     return "[" + ",".join(f"{x:.7g}" for x in vec) + "]"
 
 
-def backfill(*, only_missing: bool = True, batch_size: int = 256) -> int:
-    """Embed `documents.chunk_text` into `documents.embedding`. Returns rows written."""
+def backfill(*, only_missing: bool = True, batch_size: int = 96) -> int:
+    """Embed `documents.chunk_text` into `documents.embedding`. Returns rows written.
+
+    Re-run after every `runbook ingest`, and after any `embedding_model` change
+    (with `only_missing=False` — the whole corpus must share one model)."""
     from .db import connect
 
     query = "select id, chunk_text from documents order by id"

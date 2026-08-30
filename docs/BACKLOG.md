@@ -2,10 +2,19 @@
 
 Things we've deliberately decided to do *later*, so they don't clog the current slice.
 
-- **Keep-warm ping** — a ~3-line GitHub Action on a cron (every ~10 min during the day) that
-  hits the deployed `/health` endpoint so the host doesn't idle the service to sleep
-  (~1 min cold start otherwise). Add once deploy is live and the cold start is actually
-  annoying.
+- ~~**Keep-warm ping**~~ — done (ADR-0013): `.github/workflows/keepwarm.yml` crons `/health`
+  every 10 min. GitHub cron is unreliable (late, pauses after 60d idle); add an external
+  monitor (UptimeRobot / cron-job.org) if the cold start still bites.
+
+- **Persist the run row at *start*, not just on success** — `web_api.py::_run_incident` only
+  calls `record_run` if `diagnose()` returns; any exception publishes an SSE `error` event
+  and the run vanishes (no DB row → dashboard 404). Write a row at kickoff and set a
+  `failed` status + reason in the `except`. Surfaced while debugging the free-tier OOM 502s.
+
+- **Cache the query embedding** — every `retrieve()` now makes a Jina embedding call for the
+  alert (ADR-0013). The Week 3 semantic-cache slice keys on exactly this vector, so fold the
+  two together: compute the alert embedding once, reuse for both the cache lookup and the
+  vector-search leg.
 
 - **`/security` dashboard page** — surface the red-team ASR table (baseline vs hardened) and
   the attack families on the console, alongside `/evals`. The data is in

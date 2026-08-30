@@ -45,15 +45,9 @@ COPY --chown=appuser corpus ./corpus
 # The built dashboard. app.py serves it as the SPA when this directory exists.
 COPY --from=frontend --chown=appuser /web/dist ./web/dist
 
-# Bake the retrieval models into the image so prod does no download at runtime and
-# has no network dependency on the query path (ADR-0002 / ADR-0003). Model names
-# must match src/runbook/config.py (embedding_model, rerank_model).
-ENV FASTEMBED_CACHE_PATH=/app/.cache/fastembed
-RUN uv run --no-sync python -c "\
-from fastembed import TextEmbedding; \
-from fastembed.rerank.cross_encoder import TextCrossEncoder; \
-TextEmbedding('BAAI/bge-small-en-v1.5'); \
-TextCrossEncoder('Xenova/ms-marco-MiniLM-L-6-v2')"
+# Retrieval models (embeddings + rerank) are hosted on Jina now (ADR-0013) — no
+# model weights in the image, no onnxruntime. Keeps the container inside the
+# 512 MB free tier. Needs JINA_API_KEY at runtime.
 
 # The platform (Render) injects $PORT; default to 8000 for a bare `docker run`.
 # --no-sync: the venv is already built above; don't re-sync on every container start.

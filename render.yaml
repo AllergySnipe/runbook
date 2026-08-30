@@ -10,11 +10,18 @@ services:
     name: runbook
     runtime: docker
     dockerfilePath: ./Dockerfile
+    # free (512 MB) is viable since ADR-0013 moved the embedding + rerank models
+    # off the box (container now ~90 MB). Free tier spins down after 15 min idle
+    # (~30-60s cold start); .github/workflows/keepwarm.yml pings /health to hold
+    # it warm. Bump to `standard` (2 GB) only if memory pressure returns.
     plan: free
     healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: OPENROUTER_API_KEY
+        sync: false
+      # Jina — hosted embeddings + reranking (ADR-0013).
+      - key: JINA_API_KEY
         sync: false
       # Neon Postgres. Pooled URL for the app, direct (unpooled) for migrations.
       - key: DATABASE_URL

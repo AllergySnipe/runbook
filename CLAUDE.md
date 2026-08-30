@@ -23,6 +23,14 @@ redteam` CLI + ADR-0012 + `docs/security/log-injection.md`. First measured resul
 residual findings (alert→triage suppression, poisoned-doc exfil, a gated injected step). Not
 in CI; `tests/test_redteam.py` covers the deterministic parts.
 
+**Week 3: hosted retrieval models done** — embeddings + reranking moved off the box to
+**Jina** (`src/runbook/jina.py`, one call site; ADR-0013, superseding the local-model parts
+of 0002/0003). `jina-embeddings-v5-text-small` (1024-dim) + `jina-reranker-v2-base-multilingual`.
+`migrations/0007` widened `documents.embedding` to `vector(1024)`; corpus re-embedded. Container
+dropped ~476 MB → ~90 MB, so Render is back on the **free** plan (+ `keepwarm.yml` cron).
+Needs `JINA_API_KEY`. Retrieval no longer runs offline; `test_jina.py` mocks it, the live
+retrieval tests `skipif` without a real key.
+
 **Not started:** incident memory + red-team→eval flywheel, Langfuse tracing, `/security`
 dashboard page, poisoned-doc hydration hardening (`docs/BACKLOG.md`). Nothing executes on
 approval — no state-changing tools. `retrieve()` + tools are sync. Check before assuming a
@@ -64,6 +72,9 @@ module exists.
   (reliably enforces `json_schema`); tool loop (`diagnosis_model`) = `z-ai/glm-5.2:free` →
   `loop_fallbacks` (MiniMax m3, m2.7); eval judge = `z-ai/glm-5.2:free` → nemotron. `llm.py` is
   the one call site; it owns 429/5xx retry and walks each chain via `extra_body.models`.
+- Retrieval models: **Jina** (embeddings + reranking, hosted) — ADR-0013. `jina.py` is the one
+  call site (sync `httpx`, own retry). `jina-embeddings-v5-text-small` (1024-dim, `task`
+  adapters) + `jina-reranker-v2-base-multilingual`. Needs `JINA_API_KEY` (10M free tokens).
 
 ## Layout
 
@@ -84,8 +95,9 @@ web/               Vite + React + Tailwind SPA; `npm run build` → web/dist/ (s
                    src/{layouts,routes,components,content,lib}; components/evidence/ = native
                    tool-result rendering; content/glossary.js = the inline <Term> glossary
 tests/             pytest — deterministic by default (no model calls, no secrets);
-                   *_integration.py skip themselves without a configured database_url
-.github/workflows/ ci.yml — ruff + deterministic pytest on every push (no secrets)
+                   *_integration.py + retrieval-quality skip without database_url / real JINA_API_KEY
+.github/workflows/ ci.yml — ruff + deterministic pytest on every push (no secrets);
+                   keepwarm.yml — cron ping to /health (free-tier anti-spin-down)
 Dockerfile         node:20 build stage (web/dist) + python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
 ```

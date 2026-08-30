@@ -1,0 +1,30 @@
+name: keep-warm
+
+# The Render free tier spins the container down after ~15 min of no inbound HTTP
+# (ADR-0013), so the first dashboard hit after a quiet spell waits 30-60s for a
+# cold start. This pings /health often enough to keep it up during waking hours.
+#
+# Caveats: GitHub cron fires late under load (often +10-15 min) and pauses after
+# 60 days of repo inactivity. For a hard guarantee use an external monitor
+# (UptimeRobot / cron-job.org) instead of / alongside this.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: curl /health
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 https://runbook-cgkn.onrender.com/health) && \
+              { echo "health: $code"; [ "$code" = "200" ] && exit 0; }
+            echo "attempt $i: $code — retrying"; sleep 20
+          done
+          echo "health check did not return 200"; exit 1
