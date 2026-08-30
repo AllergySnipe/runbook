@@ -15,6 +15,7 @@ from .store import (
     list_runs,
     record_run,
     resolve_approvals,
+    set_featured,
 )
 from .triage import TriageResult, triage
 
@@ -36,5 +37,6 @@ __all__ = [
     "list_runs",
     "record_run",
     "resolve_approvals",
+    "set_featured",
     "triage",
 ]

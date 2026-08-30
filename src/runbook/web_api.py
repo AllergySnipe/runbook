@@ -148,10 +148,27 @@ async def start_incident(body: StartIncident) -> dict:
 
 
 @router.get("/incidents")
-async def list_incidents(status: str | None = None, limit: int = 20) -> list[dict]:
+async def list_incidents(
+    status: str | None = None, featured: bool | None = None, limit: int = 20
+) -> list[dict]:
     """Recent runs, newest first. In-flight runs (still in memory, not yet
-    persisted) are prepended so the UI shows them the moment they start."""
-    rows = await asyncio.to_thread(list_runs, status=status, limit=limit)
+    persisted) are prepended so the UI shows them the moment they start.
+    `featured=1` returns only the curated exemplars."""
+    rows = await asyncio.to_thread(list_runs, status=status, featured=featured, limit=limit)
+    persisted = [
+        {
+            "id": r.id,
+            "scenario": r.scenario,
+            "disposition": r.disposition,
+            "status": r.status,
+            "featured": r.featured,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]
+    if featured:
+        return persisted
+
     persisted_ids = {r.id for r in rows}
     live = [
         {
@@ -159,20 +176,11 @@ async def list_incidents(status: str | None = None, limit: int = 20) -> list[dic
             "scenario": r.scenario,
             "disposition": None,
             "status": "running",
+            "featured": False,
             "created_at": r.created_at.isoformat(),
         }
         for r in sorted(_RUNS.values(), key=lambda r: r.created_at, reverse=True)
         if not r.done and r.id not in persisted_ids and (status in (None, "running"))
-    ]
-    persisted = [
-        {
-            "id": r.id,
-            "scenario": r.scenario,
-            "disposition": r.disposition,
-            "status": r.status,
-            "created_at": r.created_at.isoformat(),
-        }
-        for r in rows
     ]
     return live + persisted
 
@@ -342,6 +350,23 @@ async def decisions() -> list[dict]:
             }
         )
     return out
+
+
+_CORPUS_DIR = Path(__file__).resolve().parents[2] / "corpus"
+
+
+@router.get("/runbooks")
+async def runbook_markdown(path: str) -> dict:
+    """Serve a runbook's markdown so the dashboard can highlight the exact line a
+    remediation step quotes. Jailed to the corpus directory."""
+    try:
+        target = (_CORPUS_DIR.parent / path).resolve()
+        target.relative_to(_CORPUS_DIR)  # raises if `path` escaped the corpus
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, "path must be inside the corpus") from exc
+    if target.suffix != ".md" or not target.is_file():
+        raise HTTPException(404, f"no runbook at {path!r}")
+    return {"path": path, "markdown": target.read_text()}
 
 
 @router.get("/evals/baseline")

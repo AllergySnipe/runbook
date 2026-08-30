@@ -37,8 +37,10 @@ COPY --chown=appuser src ./src
 COPY --chown=appuser README.md ./
 RUN uv sync --frozen
 
-# docs/adr is read at runtime by GET /api/decisions (the dashboard's Decisions page).
+# Read at runtime: docs/adr by GET /api/decisions; corpus/ by the grounding
+# hydration in core/loop.py and by GET /api/runbooks (quote highlighting).
 COPY --chown=appuser docs ./docs
+COPY --chown=appuser corpus ./corpus
 
 # The built dashboard. app.py serves it as the SPA when this directory exists.
 COPY --from=frontend --chown=appuser /web/dist ./web/dist

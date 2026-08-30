@@ -1,21 +1,57 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, ShieldCheck, Check, Minus } from "lucide-react";
 import LoopDiagram from "../components/LoopDiagram.jsx";
-import { Term } from "../components/ui.jsx";
+import { StatusPill, Term } from "../components/ui.jsx";
 import { useAsync } from "../lib/useAsync.js";
-import { getEvalBaseline } from "../api.js";
+import { getEvalBaseline, listIncidents } from "../api.js";
+import { SCENARIO_COPY } from "../content/scenarios.js";
 import { TAGLINE, PROBLEM, SAFETY, STACK, NON_GOALS } from "../content/copy.js";
 
 export default function Overview() {
   return (
     <div className="space-y-20">
       <Hero />
+      <WorkedExamples />
       <TheLoop />
       <Architecture />
       <Safety />
       <Evals />
       <StackAndScope />
     </div>
+  );
+}
+
+function WorkedExamples() {
+  const { data } = useAsync(() => listIncidents({ featured: true }), []);
+  if (!data?.length) return null;
+  return (
+    <section>
+      <p className="font-mono text-[0.7rem] font-medium uppercase tracking-[0.16em] text-[var(--color-ink-faint)]">
+        Worked examples
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        {data.map((r) => {
+          const copy = SCENARIO_COPY[r.scenario] || {};
+          return (
+            <Link
+              key={r.id}
+              to={`/incidents/${r.id}`}
+              className="rounded-lg border bg-[var(--color-surface)] p-4 hover:border-[var(--color-border-strong)]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate font-mono text-xs text-[var(--color-ink)]">
+                  {r.scenario}
+                </span>
+                <StatusPill status={r.status} />
+              </div>
+              <p className="mt-2 text-[0.82rem] leading-snug text-[var(--color-ink-muted)]">
+                {copy.oneLiner}
+              </p>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

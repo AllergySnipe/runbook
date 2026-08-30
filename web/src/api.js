@@ -10,7 +10,13 @@ async function json(res) {
   return res.json();
 }
 
-export const listIncidents = () => fetch("/api/incidents").then(json);
+export const listIncidents = (opts = {}) => {
+  const q = new URLSearchParams();
+  if (opts.featured) q.set("featured", "1");
+  if (opts.status) q.set("status", opts.status);
+  const qs = q.toString();
+  return fetch(`/api/incidents${qs ? `?${qs}` : ""}`).then(json);
+};
 
 export const getIncident = (id) => fetch(`/api/incidents/${id}`).then(json);
 
@@ -19,6 +25,9 @@ export const listScenarios = () => fetch("/api/scenarios").then(json);
 export const listDecisions = () => fetch("/api/decisions").then(json);
 
 export const getEvalBaseline = () => fetch("/api/evals/baseline").then(json);
+
+export const getRunbook = (path) =>
+  fetch(`/api/runbooks?path=${encodeURIComponent(path)}`).then(json);
 
 export const startIncident = (body) =>
   fetch("/api/incidents", {

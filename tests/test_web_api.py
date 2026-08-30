@@ -216,3 +216,28 @@ def test_evals_baseline_endpoint_returns_the_blessed_metrics():
     body = resp.json()
     assert body["n_cases"] == 30
     assert 0 <= body["metrics"]["retrieval_hit_at_3"] <= 1
+
+
+def test_runbooks_endpoint_serves_corpus_markdown():
+    path = "corpus/synthetic/paymentsvc/bad-migration-table-lock.md"
+    resp = client.get("/api/runbooks", params={"path": path})
+    assert resp.status_code == 200
+    assert "# " in resp.json()["markdown"]
+
+
+def test_runbooks_endpoint_refuses_path_traversal():
+    for bad in ["../../etc/passwd", "src/runbook/config.py", "/etc/hosts"]:
+        resp = client.get("/api/runbooks", params={"path": bad})
+        assert resp.status_code in (400, 404), bad
+
+
+def test_incidents_featured_filter_passes_through(monkeypatch):
+    seen = {}
+
+    def fake_list(**kw):
+        seen.update(kw)
+        return []
+
+    monkeypatch.setattr(web_api, "list_runs", fake_list)
+    client.get("/api/incidents", params={"featured": "1"})
+    assert seen["featured"] is True

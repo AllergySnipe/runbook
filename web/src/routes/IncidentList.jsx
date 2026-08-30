@@ -10,12 +10,14 @@ const STATUSES = ["awaiting-approval", "resolved", "rejected", "escalated", "sho
 
 export default function IncidentList() {
   const [rows, setRows] = useState([]);
+  const [featured, setFeatured] = useState([]);
   const [filter, setFilter] = useState(null);
   const [err, setErr] = useState(null);
 
   const refresh = () => listIncidents().then(setRows).catch((e) => setErr(e.message));
   useEffect(() => {
     refresh();
+    listIncidents({ featured: true }).then(setFeatured).catch(() => {});
     const t = setInterval(refresh, 4000);
     return () => clearInterval(t);
   }, []);
@@ -31,6 +33,8 @@ export default function IncidentList() {
           watch the loop work in real time, or open a past run to inspect its full audit record.
         </p>
       </header>
+
+      {featured.length > 0 && <Featured runs={featured} />}
 
       <Launcher onStarted={refresh} />
 
@@ -97,6 +101,38 @@ export default function IncidentList() {
         </Panel>
       </section>
     </div>
+  );
+}
+
+function Featured({ runs }) {
+  return (
+    <section>
+      <h2 className="mb-3 font-mono text-[0.68rem] font-medium uppercase tracking-[0.14em] text-[var(--color-ink-faint)]">
+        featured runs — worked examples
+      </h2>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {runs.map((r) => {
+          const copy = SCENARIO_COPY[r.scenario] || {};
+          return (
+            <Link
+              key={r.id}
+              to={`/incidents/${r.id}`}
+              className="flex flex-col rounded-lg border bg-[var(--color-surface)] p-3.5 hover:border-[var(--color-border-strong)]"
+            >
+              <div className="flex items-center justify-between">
+                <span className="truncate font-mono text-xs text-[var(--color-ink)]">
+                  {r.scenario}
+                </span>
+                <StatusPill status={r.status} />
+              </div>
+              <p className="mt-1.5 text-[0.78rem] leading-snug text-[var(--color-ink-muted)]">
+                {copy.oneLiner}
+              </p>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
