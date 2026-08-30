@@ -8,7 +8,7 @@ import { StatusPill, Stat, StatRow, Term, Panel } from "../components/ui.jsx";
 import { SCENARIO_COPY } from "../content/scenarios.js";
 import Proposal from "../components/Proposal.jsx";
 import ApprovalForm from "../components/ApprovalForm.jsx";
-import OutcomeForm, { RecordedOutcome } from "../components/OutcomeForm.jsx";
+import OutcomeForm, { RecordedOutcome, SimilarIncidents } from "../components/OutcomeForm.jsx";
 
 export default function IncidentDetail() {
   const { id } = useParams();
@@ -130,6 +130,7 @@ export default function IncidentDetail() {
           </Panel>
 
           {phase === "running" && <ConsoleStream events={events} streaming={streaming} />}
+          {rec && <SimilarIncidents memories={rec.memories} />}
           {rec && <Proposal record={rec} />}
           {rec?.status === "awaiting-approval" && <ApprovalForm record={rec} onResolved={setRec} />}
           {rec && <RecordedOutcome outcome={rec.outcome} />}

@@ -104,7 +104,9 @@ async def _run_incident(run: IncidentRun, k: int) -> None:
         log.exception("could not pre-persist incident %s", run.id)
 
     try:
-        result = await diagnose(run.alert, run.scenario, k=k, on_event=run.publish, use_cache=True)
+        result = await diagnose(
+            run.alert, run.scenario, k=k, on_event=run.publish, use_cache=True, use_memory=True
+        )
         rec = await asyncio.to_thread(record_run, result, run_id=run.id)
         run.publish(ev.event(ev.FINISHED, run_id=run.id, status=rec.status))
     except asyncio.CancelledError:

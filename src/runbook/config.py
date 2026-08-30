@@ -66,11 +66,15 @@ class Settings(BaseSettings):
     # `incident_memory` and retrieved on future similar alerts as *context* (never
     # a grounding source — S3 is unchanged). `memory_similarity_floor` is a real
     # gate: below it the loop sees no similar incidents rather than a weak match.
-    # The band that separates a genuine recurrence from a merely-adjacent incident
-    # is narrow — see the calibration table in ADR-0015. `memory_dedupe_threshold`
-    # is the tight store-time bar that stops a recurring page filling memory with
+    # Calibration (`scripts/calibrate_memory_threshold.py`, ADR-0015): recurrences
+    # of the same incident embed at min 0.905, cross-scenario alerts at max 0.752,
+    # diverse paraphrases at max 0.776 — so at 0.88 memory catches every
+    # recurrence with zero false hits, but does NOT fire on a merely-similar
+    # different incident (the paraphrase and cross-scenario bands overlap, so
+    # "loosely similar" cannot be caught safely). `memory_dedupe_threshold` is the
+    # tight store-time bar that stops a recurring page filling memory with
     # near-identical rows. `memory_enabled` is the prod kill-switch; the loop only
-    # consults memory when `diagnose(use_cache=...)` is on (CLI + dashboard).
+    # consults memory when `diagnose(use_memory=...)` is on (CLI + dashboard).
     memory_enabled: bool = True
     memory_similarity_floor: float = 0.88
     memory_dedupe_threshold: float = 0.97

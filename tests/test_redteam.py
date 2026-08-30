@@ -252,7 +252,9 @@ def test_prompt_defences_disabled_strips_fences_and_noops_second_pass():
 
 
 def test_hardened_diagnose_prompt_keeps_the_trust_boundary():
-    assert "<runbook" in diag.load_prompt("diagnose", runbook_source="s", runbook_text="b")
+    assert "<runbook" in diag.load_prompt(
+        "diagnose", runbook_source="s", runbook_text="b", similar_incidents=""
+    )
 
 
 # --------------------------------------------------------------------------

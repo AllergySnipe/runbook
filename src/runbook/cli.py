@@ -87,7 +87,7 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     sc = load_scenario(args.scenario)
     alert = args.alert or f"{sc.alert or 'incident'} — {sc.summary.strip()}"
 
-    result = asyncio.run(diagnose(alert, args.scenario, k=args.k, use_cache=True))
+    result = asyncio.run(diagnose(alert, args.scenario, k=args.k, use_cache=True, use_memory=True))
 
     print(f"\nalert:    {alert}")
     print(f"scenario: {result.scenario}")
@@ -95,6 +95,10 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     print(f"triage:   {t.category}  ({t.confidence})  — {t.rationale}")
     if result.cache_hit:
         print("cache:    hit — reused triage + retrieval from a recent near-duplicate alert")
+    if result.memories:
+        print(f"memory:   {len(result.memories)} similar past incident(s) shown as context")
+        for m in result.memories:
+            print(f"          [{m.similarity:.0%}] {m.scenario}: {m.actual_root_cause[:80]}")
 
     if result.short_circuited:
         print("\n→ triage short-circuited this alert — the diagnosis loop did not run")
@@ -228,6 +232,11 @@ def _cmd_run_show(args: argparse.Namespace) -> int:
     print(f"  disposition:{r.disposition or ' — (short-circuited)'}")
     if r.retrieved:
         print("  retrieved:  " + ", ".join(c.get("path") or c.get("title") for c in r.retrieved))
+    if r.memories:
+        print(
+            "  memory:     "
+            + ", ".join(f"{m['scenario']} ({m['similarity']:.0%})" for m in r.memories)
+        )
     if r.tool_calls:
         print(
             "  tool calls: "

@@ -9,6 +9,12 @@ const ROWS = {
     tone: "muted",
     ok: true,
   }),
+  "memory.hit": (d) => ({
+    phase: "memory",
+    detail: `${d.count ?? 0} similar past incident(s) · ${((d.top_similarity ?? 0) * 100).toFixed(0)}% top — shown as context`,
+    tone: "muted",
+    ok: true,
+  }),
   "triage.start": () => ({ phase: "triage", detail: "classifying the alert", pending: true }),
   "triage.done": (d) => ({
     phase: "triage",

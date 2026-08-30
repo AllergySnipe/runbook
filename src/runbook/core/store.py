@@ -118,6 +118,7 @@ class RunRecord:
     redactions: int = 0
     cost_usd: float = 0.0  # est. $ at paid model prices (ADR-0014)
     cache_hit: bool = False  # semantic cache served the triage + retrieval prefix
+    memories: list = field(default_factory=list)  # similar past incidents shown (ADR-0015)
     approvals: list[ApprovalRecord] = field(default_factory=list)
 
 
@@ -157,6 +158,23 @@ def _retrieved_json(chunks: list) -> list[dict]:
     ]
 
 
+def _memories_json(memories: list) -> list[dict]:
+    """The similar past incidents shown to the diagnosis model this run (ADR-0015)
+    — part of the audit record's 'what was retrieved'."""
+    return [
+        {
+            "entry_id": m.entry_id,
+            "similarity": round(m.similarity, 4),
+            "age_days": m.age_days,
+            "scenario": m.scenario,
+            "actual_root_cause": m.actual_root_cause,
+            "actual_failure_mode": m.actual_failure_mode,
+            "model_was_correct": m.model_was_correct,
+        }
+        for m in memories
+    ]
+
+
 def _tool_calls_json(calls: list) -> list[dict]:
     out = []
     for t in calls:
@@ -172,7 +190,7 @@ _RUN_COLS = (
     "id, alert, scenario, triage_category, triage_rationale, triage_confidence, "
     "disposition, status, diagnosis, retrieved, tool_calls, guardrail, usage, "
     "iterations, hit_max_iters, elapsed_s, created_at, resolved_at, featured, redactions, "
-    "cost_usd, cache_hit"
+    "cost_usd, cache_hit, memories"
 )
 
 
@@ -200,6 +218,7 @@ def _row_to_record(row: tuple, approvals: list[tuple]) -> RunRecord:
         redactions=row[19] or 0,
         cost_usd=float(row[20] or 0),
         cache_hit=bool(row[21]),
+        memories=row[22] or [],
         approvals=[
             ApprovalRecord(
                 id=a[0],
@@ -276,12 +295,12 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
                 id, alert, scenario, triage_category, triage_rationale, triage_confidence,
                 disposition, status, diagnosis, retrieved, tool_calls, guardrail,
                 usage, iterations, hit_max_iters, elapsed_s, redactions, cost_usd,
-                cache_hit, resolved_at
+                cache_hit, memories, resolved_at
             ) values (
                 %s, %s, %s, %s, %s, %s,
                 %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
                 %s::jsonb, %s, %s, %s, %s, %s,
-                %s, {"now()" if status in TERMINAL else "null"}
+                %s, %s::jsonb, {"now()" if status in TERMINAL else "null"}
             )
             on conflict (id) do update set
                 alert = excluded.alert, scenario = excluded.scenario,
@@ -294,7 +313,8 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
                 usage = excluded.usage, iterations = excluded.iterations,
                 hit_max_iters = excluded.hit_max_iters, elapsed_s = excluded.elapsed_s,
                 redactions = excluded.redactions, cost_usd = excluded.cost_usd,
-                cache_hit = excluded.cache_hit, resolved_at = excluded.resolved_at
+                cache_hit = excluded.cache_hit, memories = excluded.memories,
+                resolved_at = excluded.resolved_at
             """,
             (
                 run_id,
@@ -316,6 +336,7 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
                 result.redaction_count,
                 cost_usd,
                 result.cache_hit,
+                json.dumps(_memories_json(result.memories)),
             ),
         )
         for v in gated:

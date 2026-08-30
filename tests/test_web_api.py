@@ -34,7 +34,7 @@ SCRIPT = [
 ]
 
 
-async def fake_diagnose(alert, scenario, *, k=4, on_event=None, use_cache=False):
+async def fake_diagnose(alert, scenario, *, k=4, on_event=None, use_cache=False, use_memory=False):
     emit = on_event or (lambda e: None)
     for e in SCRIPT:
         emit(e)

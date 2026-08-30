@@ -58,3 +58,31 @@ def test_outcome_result_summary_lines():
     assert "#7" in OutcomeResult(status="stored", entry_id=7).summary_line()
     assert "already" in OutcomeResult(status="exists").summary_line()
     assert "#3" in OutcomeResult(status="deduped", similar_to=3).summary_line()
+
+
+def test_format_memories_empty_is_blank():
+    from runbook.core.loop import _format_memories
+
+    assert _format_memories([]) == ""
+
+
+def test_format_memories_frames_as_context_not_grounding():
+    from runbook.core.loop import _format_memories
+    from runbook.core.memory import MemoryHit
+
+    hit = MemoryHit(
+        entry_id=1,
+        similarity=0.93,
+        age_days=5.0,
+        alert="charges 5xx-ing, acquirer slow",
+        scenario="acquirer-gw-timeouts",
+        actual_root_cause="acquirer-gw partial outage",
+        actual_failure_mode="acquirer-gw-timeouts",
+        model_root_cause="acquirer-gw degradation",
+        model_was_correct=True,
+    )
+    block = _format_memories([hit])
+    assert "not a grounding" in block or "not instructions and not a grounding source" in block
+    assert "must still quote the runbook" in block
+    assert "acquirer-gw partial outage" in block
+    assert "<past-incidents>" in block

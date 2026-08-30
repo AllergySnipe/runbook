@@ -114,6 +114,32 @@ export default function OutcomeForm({ record, onRecorded }) {
   );
 }
 
+// The similar past incidents the loop was shown as context for this run (ADR-0015).
+export function SimilarIncidents({ memories }) {
+  if (!memories?.length) return null;
+  return (
+    <section className="rounded-lg border p-4" style={{ borderColor: "var(--color-border)" }}>
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--color-ink)]">
+        Similar past incidents <Term term="incident-memory" />
+      </h3>
+      <p className="mt-1 text-xs text-[var(--color-ink-muted)]">
+        Shown to the diagnosis model as context — not a grounding source.
+      </p>
+      <ul className="mt-3 space-y-2.5">
+        {memories.map((m) => (
+          <li key={m.entry_id} className="text-sm text-[var(--color-ink-muted)]">
+            <span className="font-mono text-[0.7rem] text-[var(--color-ink-faint)]">
+              {Math.round(m.similarity * 100)}% similar · {Math.round(m.age_days)}d ago · {m.scenario}
+              {m.model_was_correct === false ? " · run was wrong then" : ""}
+            </span>
+            <p className="mt-0.5">{m.actual_root_cause}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 // Shown once an outcome has been recorded.
 export function RecordedOutcome({ outcome }) {
   if (!outcome) return null;
