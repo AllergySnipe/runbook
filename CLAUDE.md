@@ -44,9 +44,16 @@ half of the flywheel was tried as a CI gate and removed — too noisy to gate on
 (ADR-0016 §2); `runbook redteam` stays a manual point-in-time tool. Prod-verified
 (`run_a59ce5c8` memory hit).
 
-**Week 3 not started:** Langfuse tracing · `/security` dashboard page. Nothing executes on
-approval — no state-changing tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync
-(blocking HTTP, only via `asyncio.to_thread` / CLI). Check before assuming a module exists.
+**Week 3 — `/security` dashboard page** (done, not yet deployed): `GET /api/redteam` serves a
+tracked `src/runbook/redteam/latest.json` snapshot (`redteam-results/` is gitignored → absent
+from the image), blessed by `runbook redteam --condition both --bless` (parallel to
+`evals/baseline.json`). `web/src/routes/Security.jsx` + `web/src/content/security.js` render ASR
+by surface/goal (baseline vs hardened), attacks-that-got-through + containment, defence stack,
+residual risks. Narrative canonical in `docs/security/log-injection.md`. 302 tests green locally.
+
+**Week 3 not started:** Langfuse tracing. Nothing executes on approval — no state-changing
+tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync (blocking HTTP, only via
+`asyncio.to_thread` / CLI). Check before assuming a module exists.
 
 ## Golden rules
 
@@ -133,7 +140,7 @@ uv run runbook sim <action> <scenario> [...]            inspect the sim (list|sh
 uv run runbook eval [--scenario N] [--no-judge] [-j N]  golden eval set → real loop → scorecard vs baseline
 uv run runbook eval --update-baseline                   on a clean run, re-bless evals/baseline.json
 uv run runbook eval --bless eval-results/<run>.json      bless a prior --json run without re-running
-uv run runbook redteam [--condition both] [-j N] [--json P]  log-injection red-team → ASR, baseline vs hardened (manual; not in CI)
+uv run runbook redteam [--condition both] [-j N] [--json P] [--bless]  log-injection red-team → ASR, baseline vs hardened (manual; not in CI). --bless freezes redteam/latest.json (the /security page)
 
 cd web && npm install && npm run dev                    dashboard dev server (:5173, proxies /api → :8000)
 cd web && npm run build                                 build the SPA into web/dist/ (app.py then serves it)

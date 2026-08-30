@@ -457,3 +457,15 @@ async def evals_baseline() -> dict:
     if not path.is_file():
         raise HTTPException(404, "no baseline blessed yet")
     return json.loads(path.read_text())
+
+
+@router.get("/redteam")
+async def redteam_latest() -> dict:
+    """The blessed red-team snapshot (redteam/latest.json) — feeds the Security
+    page. Refreshed by `runbook redteam --condition both --bless` (ADR-0012)."""
+    from .redteam.report import load_latest
+
+    data = load_latest()
+    if data is None:
+        raise HTTPException(404, "no red-team run blessed yet")
+    return data

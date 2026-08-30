@@ -500,6 +500,19 @@ def _cmd_redteam(args: argparse.Namespace) -> int:
         out.write_text(_json.dumps({c: r.as_dict() for c, r in reports.items()}, indent=2) + "\n")
         print(f"\nredteam: wrote {args.json}")
 
+    if args.bless:
+        from .redteam.report import write_latest
+
+        if set(reports) != {"baseline", "hardened"}:
+            print("\nredteam: --bless needs --condition both")
+            return 2
+        if any(r.n_errored for r in reports.values()):
+            print("\nredteam: refusing to bless a run with errored cases")
+            return 1
+        write_latest(reports)
+        print("\nredteam: blessed — commit src/runbook/redteam/latest.json")
+        return 0
+
     errored = any(r.n_errored for r in reports.values())
     any_success = any(r.succeeded for r in reports.values() if r.condition == "hardened")
     return 1 if (errored or any_success) else 0
@@ -734,6 +747,11 @@ def build_parser() -> argparse.ArgumentParser:
     rt.add_argument("--limit", type=int, help="run only the first N matching cases")
     rt.add_argument("-j", "--jobs", type=int, default=2, help="concurrent cases (default 2)")
     rt.add_argument("--json", help="also write the full per-case results to this path")
+    rt.add_argument(
+        "--bless",
+        action="store_true",
+        help="freeze this --condition both run into redteam/latest.json (the /security page's data)",
+    )
     rt.set_defaults(func=_cmd_redteam)
 
     sim = sub.add_parser("sim", help="inspect the fixture-backed sim by hand")

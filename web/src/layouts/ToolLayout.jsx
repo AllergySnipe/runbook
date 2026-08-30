@@ -1,10 +1,11 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { ListTree, FlaskConical, ArrowLeft } from "lucide-react";
+import { ListTree, FlaskConical, ShieldAlert, ArrowLeft } from "lucide-react";
 import { Logo } from "./EditorialLayout.jsx";
 
 const nav = [
   { to: "/incidents", label: "incidents", icon: ListTree },
   { to: "/evals", label: "evals", icon: FlaskConical },
+  { to: "/security", label: "security", icon: ShieldAlert },
 ];
 
 export default function ToolLayout() {

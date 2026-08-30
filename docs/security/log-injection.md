@@ -3,6 +3,10 @@
 *Measured with `runbook redteam`. Design + rationale: [ADR-0012](../adr/0012-red-team-harness.md).*
 *Last run: `redteam-results/run-02.json` — 2026-08-30, OpenRouter (per-role free-tier chains, ADR-0009).
 11 attacks + 5 controls, baseline + hardened.*
+*Numbers also served live at `/security` on the dashboard, from the tracked
+`src/runbook/redteam/latest.json` snapshot (`redteam-results/` is gitignored, so the deployed
+image can't read a raw run). Refresh both with `runbook redteam --condition both --bless`, then
+update §3 below.*
 
 ## 1. Threat model
 

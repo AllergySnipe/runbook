@@ -14,10 +14,13 @@ Things we've deliberately decided to do *later*, so they don't clog the current 
 - ~~**Cache the query embedding**~~ — done (ADR-0014): `diagnose()` computes the alert
   embedding once and passes it to both `cache.lookup` and `retrieve(query_vec=)`.
 
-- **`/security` dashboard page** — surface the red-team ASR table (baseline vs hardened) and
-  the attack families on the console, alongside `/evals`. The data is in
-  `redteam-results/*.json` + `docs/security/log-injection.md`; needs a small API endpoint
-  and a route. Deferred out of the Week 3 slice-2 harness build (ADR-0012).
+- ~~**`/security` dashboard page**~~ — done: `GET /api/redteam` serves the tracked
+  `src/runbook/redteam/latest.json` snapshot (`redteam-results/` is gitignored → not in the
+  image, so `runbook redteam --condition both --bless` freezes a blessed run, parallel to
+  `evals/baseline.json`); `web/src/routes/Security.jsx` renders ASR by surface + by goal
+  (baseline vs hardened), the attacks that got through + what contained each, the defence
+  stack, and the residual risks. Narrative sourced from `docs/security/log-injection.md`
+  (still canonical) via `web/src/content/security.js`.
 
 - **Poisoned-doc hydration hardening** — `core/loop.py::_full_doc` hydrates the full source
   for the top retrieved chunk when it has an on-disk `path`. A retrieved doc with no path

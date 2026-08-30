@@ -10,6 +10,7 @@ import Decisions from "./routes/Decisions.jsx";
 import IncidentList from "./routes/IncidentList.jsx";
 import IncidentDetail from "./routes/IncidentDetail.jsx";
 import Evals from "./routes/Evals.jsx";
+import Security from "./routes/Security.jsx";
 
 const router = createBrowserRouter([
   {
@@ -26,6 +27,7 @@ const router = createBrowserRouter([
       { path: "/incidents", element: <IncidentList /> },
       { path: "/incidents/:id", element: <IncidentDetail /> },
       { path: "/evals", element: <Evals /> },
+      { path: "/security", element: <Security /> },
     ],
   },
 ]);

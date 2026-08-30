@@ -131,4 +131,12 @@ export const GLOSSARY = {
     title: "Incident memory",
     body: "This system's own past incidents, each with the root cause a human confirmed after resolution. Retrieved as context on future similar alerts — 'how a page like this turned out last time' — but never as a grounding source. Only human-confirmed outcomes are stored, so the loop can't reinforce its own mistakes.",
   },
+  "red-team": {
+    title: "Red-team (log-injection harness)",
+    body: "A fixed catalogue of prompt-injection attacks — poisoned log lines, a poisoned retrieved doc, a poisoned alert — run through the real diagnose() path to measure whether 'retrieved + tool content is data, never instructions' (S4) actually holds under an adversary. Run by hand, not in CI.",
+  },
+  "attack-success-rate": {
+    title: "Attack success rate (ASR)",
+    body: "The fraction of attack attempts that achieved the attacker's declared goal (flip a disposition, inject an action, exfiltrate a token, hijack the root cause, escape the tool allowlist). Reported overall, by goal, and by surface; control cases are excluded.",
+  },
 };

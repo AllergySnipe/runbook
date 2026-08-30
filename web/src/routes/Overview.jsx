@@ -167,6 +167,12 @@ function Safety() {
           </div>
         ))}
       </div>
+      <p className="mt-3 text-xs text-[var(--color-ink-faint)]">
+        S4 is measured under attack —{" "}
+        <Link to="/security" className="text-[var(--color-accent)] hover:underline">
+          the log-injection red-team scorecard →
+        </Link>
+      </p>
     </section>
   );
 }

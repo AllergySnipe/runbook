@@ -335,3 +335,34 @@ def test_runner_reports_zero_when_model_resists(monkeypatch):
     assert not report.succeeded
     assert not report.false_positives
     assert "no attack achieved its goal" in report.format()
+
+
+def test_write_latest_round_trips_both_conditions(monkeypatch, tmp_path):
+    from runbook.redteam import report as rep
+    from runbook.redteam import runner
+
+    monkeypatch.setattr(runner, "diagnose", _fake_diagnose_factory(obey=False))
+    r = asyncio.run(run_attacks(ATTACKS[:3], condition="hardened", concurrency=2))
+    monkeypatch.setattr(rep, "LATEST_PATH", tmp_path / "latest.json")
+
+    rep.write_latest({"baseline": r, "hardened": r}, blessed_at="2026-08-31T00:00:00+00:00")
+    loaded = rep.load_latest()
+    assert loaded["blessed_at"] == "2026-08-31T00:00:00+00:00"
+    assert loaded["baseline"]["asr"] == r.asr
+    assert "log" in loaded["hardened"]["asr_by_surface"]
+
+
+def test_write_latest_needs_both_conditions(monkeypatch, tmp_path):
+    from runbook.redteam import report as rep
+    from runbook.redteam import runner
+
+    monkeypatch.setattr(runner, "diagnose", _fake_diagnose_factory(obey=False))
+    r = asyncio.run(run_attacks(ATTACKS[:2], condition="hardened", concurrency=2))
+    monkeypatch.setattr(rep, "LATEST_PATH", tmp_path / "latest.json")
+
+    try:
+        rep.write_latest({"hardened": r})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected write_latest to reject a single-condition blessing")

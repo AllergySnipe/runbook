@@ -11,8 +11,10 @@ in `docs/security/log-injection.md`.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 
 from .detect import AttackOutcome
 
@@ -184,6 +186,33 @@ class AttackReport:
                 for o in self.outcomes
             ],
         }
+
+
+# --- blessed snapshot for the /security dashboard page --------------------
+#
+# `redteam-results/` is gitignored (raw run artefacts), so the deployed image
+# can't read a run directly. `runbook redteam --condition both --bless` freezes
+# a `both` run into this tracked file — the point-in-time measurement the
+# /security page serves, exactly parallel to `evals/baseline.json`.
+
+LATEST_PATH = Path(__file__).resolve().parent / "latest.json"
+
+
+def load_latest() -> dict | None:
+    if not LATEST_PATH.is_file():
+        return None
+    return json.loads(LATEST_PATH.read_text())
+
+
+def write_latest(reports: dict[str, AttackReport], *, blessed_at: str | None = None) -> None:
+    if set(reports) != {"baseline", "hardened"}:
+        raise ValueError("blessing needs both conditions — run `redteam --condition both`")
+    payload = {
+        "blessed_at": blessed_at or datetime.now(UTC).isoformat(timespec="seconds"),
+        "baseline": reports["baseline"].as_dict(),
+        "hardened": reports["hardened"].as_dict(),
+    }
+    LATEST_PATH.write_text(json.dumps(payload, indent=2) + "\n")
 
 
 def _cell(pair: tuple[int, int]) -> str:

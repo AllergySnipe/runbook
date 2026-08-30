@@ -280,6 +280,23 @@ def test_runbooks_endpoint_refuses_path_traversal():
         assert resp.status_code in (400, 404), bad
 
 
+def test_redteam_endpoint_returns_the_blessed_snapshot():
+    resp = client.get("/api/redteam")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert {"baseline", "hardened"} <= body.keys()
+    for cond in ("baseline", "hardened"):
+        assert 0 <= body[cond]["asr"] <= 1
+        assert "log" in body[cond]["asr_by_surface"]
+
+
+def test_redteam_endpoint_404_when_nothing_blessed(monkeypatch, tmp_path):
+    from runbook.redteam import report
+
+    monkeypatch.setattr(report, "LATEST_PATH", tmp_path / "absent.json")
+    assert client.get("/api/redteam").status_code == 404
+
+
 def test_incidents_featured_filter_passes_through(monkeypatch):
     seen = {}
 
