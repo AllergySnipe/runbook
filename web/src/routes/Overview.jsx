@@ -159,16 +159,8 @@ function Safety() {
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs font-semibold text-[var(--color-accent)]">{s.id}</span>
               <span className="text-sm font-medium text-[var(--color-ink)]">{s.title}</span>
-              <span className="ml-auto">
-                {s.status === "enforced" ? (
-                  <span className="inline-flex items-center gap-1 text-[0.65rem] font-semibold uppercase text-[var(--color-ok)]">
-                    <ShieldCheck size={12} /> enforced
-                  </span>
-                ) : (
-                  <span className="text-[0.65rem] font-semibold uppercase text-[var(--color-ink-faint)]">
-                    planned
-                  </span>
-                )}
+              <span className="ml-auto inline-flex items-center gap-1 text-[0.65rem] font-semibold uppercase text-[var(--color-ok)]">
+                <ShieldCheck size={12} /> enforced
               </span>
             </div>
             <p className="mt-1.5 text-[0.8rem] leading-relaxed text-[var(--color-ink-muted)]">{s.body}</p>

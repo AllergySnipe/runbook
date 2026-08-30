@@ -21,7 +21,7 @@ const SOFT_METRICS = [
 ];
 
 const COMPOSITION = [
-  ["18", "canonical + 3 paraphrased alerts, across the 6 failure modes"],
+  ["24", "canonical + 3 paraphrased alerts, across the 6 failure modes"],
   ["4", "negatives — healthy / flapping alerts that should short-circuit"],
   ["2", "novel incidents — no runbook covers them; escalation expected"],
 ];

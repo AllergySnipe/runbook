@@ -26,7 +26,10 @@ const DEEP = {
         <Term term="rrf">Reciprocal Rank Fusion</Term>, then a{" "}
         <Term term="cross-encoder">cross-encoder rerank</Term> of the top 30 into the top-k. The
         matched chunk is often a symptom section, so the full top runbook is hydrated from disk to
-        put the Remediation section in context.
+        put the Remediation section in context. A parallel lookup against{" "}
+        <Term term="incident-memory">incident memory</Term> surfaces a past incident whose root
+        cause a human confirmed — shown as context, never a grounding source, and only when the
+        new alert closely matches a recurrence.
       </>
     ),
   },

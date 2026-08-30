@@ -125,7 +125,7 @@ export const GLOSSARY = {
   },
   redaction: {
     title: "Redaction (S5)",
-    body: "Stripping secrets and PII from any text before it reaches a model provider or a trace. Specified for Runbook; not yet built.",
+    body: "A deterministic scrub that removes secrets and PII from any text before it reaches a model provider or a trace, at two enforcement points: tool output and retrieved runbook text.",
   },
   "incident-memory": {
     title: "Incident memory",

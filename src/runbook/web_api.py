@@ -383,6 +383,20 @@ _ADR_FIELD = re.compile(r"^-\s+\*\*(Status|Date|Deciders):\*\*\s+(.+)$", re.MULT
 # ADRs not surfaced on the public dashboard.
 _ADR_HIDDEN: frozenset[int] = frozenset({9})
 
+_ADR_SUPERSEDE = re.compile(r"superseded[^[]*\[ADR-(\d+)\]", re.IGNORECASE)
+
+
+def _clean_status(raw: str | None) -> tuple[str | None, list[int]]:
+    """`Status:` lines can carry a "superseded in part by [ADR-0013](…)" clause.
+    Split that out: the badge shows just the primary word (`Accepted`), and the
+    supersede link renders as its own muted marker rather than raw markdown."""
+    if not raw:
+        return None, []
+    superseded_by = sorted({int(m) for m in _ADR_SUPERSEDE.findall(raw)})
+    primary = re.split(r"[;.]", raw, maxsplit=1)[0]
+    primary = re.sub(r"[*_`]", "", primary).strip()
+    return primary or None, superseded_by
+
 
 @router.get("/decisions")
 async def decisions() -> list[dict]:
@@ -397,7 +411,11 @@ async def decisions() -> list[dict]:
         title = text.splitlines()[0].lstrip("# ").strip()
         if " — " in title:
             title = title.split(" — ", 1)[1]
+        title = re.sub(
+            r"\s*\([^()]*\)\s*$", "", title
+        )  # drop a trailing (parenthetical) for the list
         fields = {k.lower(): v.strip() for k, v in _ADR_FIELD.findall(text)}
+        status, superseded_by = _clean_status(fields.get("status"))
         context = ""
         if "## Context" in text:
             context = text.split("## Context", 1)[1].split("\n## ", 1)[0].strip()
@@ -406,7 +424,8 @@ async def decisions() -> list[dict]:
                 "number": num,
                 "slug": path.stem,
                 "title": title,
-                "status": fields.get("status"),
+                "status": status,
+                "superseded_by": superseded_by,
                 "date": fields.get("date"),
                 "context": context,
             }

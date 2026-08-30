@@ -249,6 +249,15 @@ def test_decisions_endpoint_indexes_the_adrs():
     assert rows == sorted(rows, key=lambda r: r["number"])
     assert 9 not in [r["number"] for r in rows]  # ADR-0009 not surfaced publicly
 
+    by_num = {r["number"]: r for r in rows}
+    # status is the primary word only — no raw markdown / "superseded" clause in the badge
+    for r in rows:
+        assert ";" not in r["status"] and "*" not in r["status"] and "[" not in r["status"]
+    # ADR-0002 (local embedding model) is superseded in part by ADR-0013 (Jina)
+    assert by_num[2]["status"] == "Accepted"
+    assert by_num[2]["superseded_by"] == [13]
+    assert "(" not in by_num[2]["title"]  # trailing parenthetical trimmed for the list
+
 
 def test_evals_baseline_endpoint_returns_the_blessed_metrics():
     resp = client.get("/api/evals/baseline")

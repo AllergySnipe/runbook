@@ -23,7 +23,7 @@ export const LOOP_STEPS = [
     n: 2,
     title: "Retrieve",
     short: "Find the runbook + similar incidents",
-    body: "Hybrid search over a corpus of ~2,100 runbook and postmortem chunks: dense vector similarity and Postgres full-text, fused with Reciprocal Rank Fusion, then a cross-encoder rerank of the top 30 into a top-k. The full top runbook is hydrated from disk so the Remediation section is in context, not just the symptom chunk that matched.",
+    body: "Hybrid search over a corpus of ~2,100 runbook and postmortem chunks: dense vector similarity and Postgres full-text, fused with Reciprocal Rank Fusion, then a cross-encoder rerank of the top 30 into a top-k. The full top runbook is hydrated from disk so the Remediation section is in context, not just the symptom chunk that matched. A separate lookup also pulls back any past incident whose root cause a human has confirmed, when the new alert closely matches it — as context, never a grounding source.",
     safety: null,
   },
   {
@@ -96,8 +96,8 @@ export const SAFETY = [
   {
     id: "S5",
     title: "Secret / PII redaction",
-    body: "Secrets and PII are redacted from any text before it reaches a model provider or a trace.",
-    status: "planned",
+    body: "A deterministic scrub removes secrets and PII from any text before it reaches a model provider or a trace — at two enforcement points: tool output and retrieved runbook text.",
+    status: "enforced",
   },
   {
     id: "S6",
@@ -112,7 +112,7 @@ export const STACK = [
   ["FastAPI", "REST + SSE for run progress; serves the built SPA."],
   ["Postgres + pgvector (Neon)", "Corpus index, incident runs, approvals, eval results."],
   ["Provider-neutral model layer", "One call site; per-role model routing with fallback chains."],
-  ["fastembed (local)", "BGE-small embeddings + MiniLM cross-encoder, baked into the image."],
+  ["Jina (hosted retrieval)", "Embeddings + cross-encoder reranking over one API — no model in the image."],
   ["React + Vite + Tailwind", "This dashboard; built to static files, served by FastAPI."],
   ["Docker → Render", "One image, git-push-to-deploy."],
 ];

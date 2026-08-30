@@ -49,6 +49,11 @@ function DecisionRow({ d }) {
           ADR-{String(d.number).padStart(4, "0")}
         </span>
         <span className="flex-1 text-sm font-medium text-[var(--color-ink)]">{d.title}</span>
+        {d.superseded_by?.length > 0 && (
+          <span className="hidden text-[0.62rem] font-medium uppercase tracking-wide text-[var(--color-ink-faint)] sm:inline">
+            superseded in part · ADR-{String(d.superseded_by[0]).padStart(4, "0")}
+          </span>
+        )}
         {d.status && (
           <span className="hidden text-[0.65rem] font-semibold uppercase tracking-wide text-[var(--color-ok)] sm:inline">
             {d.status}
