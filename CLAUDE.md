@@ -11,7 +11,7 @@ before any state-changing action.
 ## Status
 
 **Weeks 0–2 done; deployed (`main` HEAD, https://runbook-cgkn.onrender.com).** Neon +
-`migrations/0001`–`0005`; `ingest/` (2102 chunks) + `embed.py` (ADR-0002); `rag/` hybrid
+`migrations/0001`–`0006`; `ingest/` (2102 chunks) + `embed.py` (ADR-0002); `rag/` hybrid
 retrieve + rerank (ADR-0003); `sim/` (7 scenarios) + `tools.py` (4 read-only tools + allowlist,
 ADR-0004); `core/` = `loop.py` manual tool-use loop → grounded `Diagnosis` (ADR-0005),
 `triage.py` (4-lane), `guardrail.py` (S3 enforcement + independent action classification +
@@ -29,8 +29,14 @@ Vite/React SPA in two registers (editorial `/ /how-it-works /decisions`; console
 chains in `config.py`; `llm.py` owns retry). Blessed baseline: 30/30, deterministic 1.00,
 judge 0.91.
 
+**Redaction (S5) done (ADR-0011).** `redact.py` — deterministic scrubber (regex + Luhn +
+RFC-1918), two enforcement points: `llm.py._redact_outgoing` (choke point — every outgoing
+message) and `core/loop.py` (each tool result before it enters history + the audit record;
+runbook text before `_check_grounding`). Count persisted (`incident_runs.redactions`, `0006`)
++ `redaction` timeline event. NER deferred — zero recall on free-form PII, accepted.
+
 **Not started:** incident memory (+ feeding root-cause notes back to eval cases), Langfuse
-tracing, redaction (S5). Nothing executes on approval — no state-changing tools. `retrieve()`
+tracing. Nothing executes on approval — no state-changing tools. `retrieve()`
 + tools are sync (`asyncio.to_thread`). Check before assuming a module exists.
 
 ## Golden rules

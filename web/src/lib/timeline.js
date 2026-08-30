@@ -25,6 +25,14 @@ const ROWS = {
     ok: !d.is_error,
     err: d.is_error,
   }),
+  redaction: (d) => {
+    const kinds = Object.keys(d.kinds || {}).join(", ");
+    return {
+      phase: "redaction",
+      detail: `${d.count} span(s) scrubbed from tool output${kinds ? ` · ${kinds}` : ""}`,
+      tone: "warn",
+    };
+  },
   "synthesis.start": () => ({ phase: "synthesise", detail: "drafting diagnosis", pending: true }),
   "synthesis.done": (d) => ({
     phase: "synthesise",

@@ -86,7 +86,16 @@ def _triage(category: str = "known-runbook") -> diag.TriageResult:
     return diag.TriageResult(category=category, rationale="fake", confidence="high")
 
 
-def _run(monkeypatch, *, turns, diagnosis, max_iters=8, triage=None, second_pass_concerns=None):
+def _run(
+    monkeypatch,
+    *,
+    turns,
+    diagnosis,
+    max_iters=8,
+    triage=None,
+    second_pass_concerns=None,
+    on_event=None,
+):
     """Wire fakes and run diagnose().
 
     `turns` is a list of `(label, [blocks])` — the label is decorative; the blocks
@@ -138,7 +147,10 @@ def _run(monkeypatch, *, turns, diagnosis, max_iters=8, triage=None, second_pass
 
     return asyncio.get_event_loop().run_until_complete(
         diag.diagnose(
-            "PaymentsvcP99LatencyHigh", "db-connection-pool-exhaustion", max_iters=max_iters
+            "PaymentsvcP99LatencyHigh",
+            "db-connection-pool-exhaustion",
+            max_iters=max_iters,
+            on_event=on_event,
         )
     )
 
@@ -272,6 +284,52 @@ def test_bad_tool_arguments_come_back_as_an_error_result(monkeypatch):
 
     assert result.tool_calls[0].is_error is True
     assert "bad arguments" in result.tool_calls[0].result_json
+
+
+def test_tool_output_is_redacted_before_history_and_audit(monkeypatch):
+    """S5 (ADR-0011): a secret in tool output never reaches the message history
+    or the recorded `ToolCall`, the count lands on the result, and one
+    `redaction` event is emitted."""
+    monkeypatch.setattr(
+        diag, "run_tool", lambda *a: ("db down: postgresql://svc:p4ss@10.9.9.9:5432/pmt", False)
+    )
+    events: list = []
+    turns = [
+        ("tool_use", [_tool_block("search_logs", {"query": "redis"})]),
+        ("end_turn", [_text_block("done")]),
+    ]
+    result = _run(
+        monkeypatch,
+        turns=turns,
+        diagnosis=_diagnosis("Roll back the implicated deploy"),
+        on_event=events.append,
+    )
+
+    tc = result.tool_calls[0]
+    assert "postgresql://svc:p4ss@10.9.9.9:5432/pmt" not in tc.result_json
+    assert "[redacted:connection-string]" in tc.result_json
+    assert result.redaction_count == 1
+
+    redaction_events = [e for e in events if e["type"] == "redaction"]
+    assert len(redaction_events) == 1
+    assert redaction_events[0]["data"]["count"] == 1
+    assert redaction_events[0]["data"]["kinds"] == {"connection-string": 1}
+
+
+def test_clean_tool_output_emits_no_redaction_event(monkeypatch):
+    turns = [
+        ("tool_use", [_tool_block("query_metrics", {"metric": "paymentsvc_db_pool_checked_out"})]),
+        ("end_turn", [_text_block("pinned at size")]),
+    ]
+    events: list = []
+    result = _run(
+        monkeypatch,
+        turns=turns,
+        diagnosis=_diagnosis("Roll back the implicated deploy"),
+        on_event=events.append,
+    )
+    assert result.redaction_count == 0
+    assert not [e for e in events if e["type"] == "redaction"]
 
 
 def test_triage_short_circuit_skips_the_loop(monkeypatch):

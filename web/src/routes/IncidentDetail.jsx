@@ -111,6 +111,9 @@ export default function IncidentDetail() {
                 sub="in / out"
               />
               {rec.diagnosis && <Stat label="confidence" value={rec.diagnosis.confidence} />}
+              {rec.redactions > 0 && (
+                <Stat label="redactions" value={rec.redactions} term="redaction" sub="tool output" />
+              )}
               <Stat label="disposition" value={rec.disposition || "—"} term="disposition" />
             </StatRow>
           )}

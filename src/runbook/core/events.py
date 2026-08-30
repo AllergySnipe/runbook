@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # +redaction (S5)
 
 
 class Event(TypedDict):
@@ -34,6 +34,7 @@ SHORT_CIRCUIT = "short_circuit"  # triage routed this out of the loop
 RETRIEVE_START = "retrieve.start"
 RETRIEVE_DONE = "retrieve.done"
 TOOL_CALL = "tool_call"  # one read-only tool executed
+REDACTION = "redaction"  # S5: secrets/PII scrubbed from tool output before it entered history
 SYNTHESIS_START = "synthesis.start"
 SYNTHESIS_DONE = "synthesis.done"
 GROUNDING_REGENERATED = "grounding.regenerated"  # S3: a step failed the quote check

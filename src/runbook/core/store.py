@@ -104,6 +104,7 @@ class RunRecord:
     created_at: datetime
     resolved_at: datetime | None
     featured: bool = False
+    redactions: int = 0
     approvals: list[ApprovalRecord] = field(default_factory=list)
 
 
@@ -157,7 +158,7 @@ def _tool_calls_json(calls: list) -> list[dict]:
 _RUN_COLS = (
     "id, alert, scenario, triage_category, triage_rationale, triage_confidence, "
     "disposition, status, diagnosis, retrieved, tool_calls, guardrail, usage, "
-    "iterations, hit_max_iters, elapsed_s, created_at, resolved_at, featured"
+    "iterations, hit_max_iters, elapsed_s, created_at, resolved_at, featured, redactions"
 )
 
 
@@ -182,6 +183,7 @@ def _row_to_record(row: tuple, approvals: list[tuple]) -> RunRecord:
         created_at=row[16],
         resolved_at=row[17],
         featured=bool(row[18]),
+        redactions=row[19] or 0,
         approvals=[
             ApprovalRecord(
                 id=a[0],
@@ -225,11 +227,11 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
             insert into incident_runs (
                 id, alert, scenario, triage_category, triage_rationale, triage_confidence,
                 disposition, status, diagnosis, retrieved, tool_calls, guardrail,
-                usage, iterations, hit_max_iters, elapsed_s, resolved_at
+                usage, iterations, hit_max_iters, elapsed_s, redactions, resolved_at
             ) values (
                 %s, %s, %s, %s, %s, %s,
                 %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
-                %s::jsonb, %s, %s, %s, {"now()" if status in TERMINAL else "null"}
+                %s::jsonb, %s, %s, %s, %s, {"now()" if status in TERMINAL else "null"}
             )
             """,
             (
@@ -249,6 +251,7 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
                 result.iterations,
                 result.hit_max_iters,
                 result.elapsed_s,
+                result.redaction_count,
             ),
         )
         for v in gated:

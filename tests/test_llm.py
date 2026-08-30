@@ -222,3 +222,59 @@ def test_parse_retries_an_empty_content_then_succeeds(fake):
     fake.create_seq = [_resp(content="   "), _resp(content='{"ok": true}')]
     obj, _ = _await(llm.parse([], model="m", system="s", schema=Tiny))
     assert obj == Tiny(ok=True)
+
+
+# --- S5 redaction: the choke point (ADR-0011) ------------------------------
+
+
+def test_run_turn_redacts_every_outgoing_message(fake):
+    fake.create_seq = [_resp(content="ok")]
+    _await(
+        llm.run_turn(
+            [
+                {
+                    "role": "user",
+                    "content": "log line: Authorization: Bearer sk-live-abcd1234efgh5678",
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "t1",
+                    "content": "psql: postgresql://u:pw@10.1.2.3/db",
+                },
+            ],
+            model="m",
+            system="oncall is jane@corp.example.com",
+            tools=[],
+        )
+    )
+    sent = fake.create_calls[0]["messages"]
+    blob = "".join(m["content"] for m in sent if isinstance(m.get("content"), str))
+    assert "sk-live-abcd1234efgh5678" not in blob
+    assert "postgresql://u:pw@10.1.2.3/db" not in blob
+    assert "jane@corp.example.com" not in blob
+    assert "[redacted:" in blob
+
+
+def test_parse_redacts_before_the_provider_call(fake):
+    fake.create_seq = [_resp(content='{"ok": true}')]
+    _await(
+        llm.parse(
+            [{"role": "user", "content": "card 4111 1111 1111 1111 seen in logs"}],
+            model="m",
+            system="s",
+            schema=Tiny,
+        )
+    )
+    sent = "".join(m["content"] for m in fake.create_calls[0]["messages"])
+    assert "4111 1111 1111 1111" not in sent
+    assert "[redacted:card]" in sent
+
+
+def test_redaction_leaves_clean_messages_untouched(fake):
+    fake.create_seq = [_resp(content="ok")]
+    _await(
+        llm.run_turn(
+            [{"role": "user", "content": "pool checked out = 20"}], model="m", system="s", tools=[]
+        )
+    )
+    assert fake.create_calls[0]["messages"][-1]["content"] == "pool checked out = 20"

@@ -63,7 +63,7 @@ export function openEventStream(id, onEvent) {
   return () => es.close();
 }
 
-// Must match core/events.py (SCHEMA_VERSION 1).
+// Must match core/events.py (SCHEMA_VERSION 2).
 export const EVENT_TYPES = [
   "triage.start",
   "triage.done",
@@ -71,6 +71,7 @@ export const EVENT_TYPES = [
   "retrieve.start",
   "retrieve.done",
   "tool_call",
+  "redaction",
   "synthesis.start",
   "synthesis.done",
   "grounding.regenerated",

@@ -1,8 +1,9 @@
 """The single place model calls go through.
 
 Provider: **OpenRouter** (OpenAI-compatible), free models — see `docs/adr/0009`.
-Deliberately thin — no agent framework (ADR-0001). Routing, retry, and (later)
-tracing + redaction hook in here rather than being scattered across call sites.
+Deliberately thin — no agent framework (ADR-0001). Routing, retry, S5 redaction
+(`_redact_outgoing`, the choke point — ADR-0011), and (later) tracing hook in
+here rather than being scattered across call sites.
 
 Three primitives, provider-neutral return types so the loop never imports
 `openai`:
@@ -33,6 +34,7 @@ from openai import APIConnectionError, APIStatusError, RateLimitError
 from pydantic import BaseModel, ValidationError
 
 from .config import get_settings
+from .redact import redact as _redact
 
 _client: openai.AsyncOpenAI | None = None
 
@@ -88,6 +90,23 @@ def _with_system(messages: list[dict], system: str | None) -> list[dict]:
     if not system:
         return messages
     return [{"role": "system", "content": system}, *messages]
+
+
+def _redact_outgoing(messages: list[dict]) -> list[dict]:
+    """S5 choke point (ADR-0011): scrub secrets / PII from every string that
+    leaves for the provider — `system` included, since `_with_system` has
+    already folded it in. Idempotent, so re-scrubbing content `core/loop.py`
+    already redacted is a no-op. Non-string content (an assistant tool-call
+    message carries `content: None`) passes through untouched."""
+    out: list[dict] = []
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, str) and c:
+            r = _redact(c)
+            if r.count:
+                m = {**m, "content": r.text}
+        out.append(m)
+    return out
 
 
 def _usage(u: object | None) -> Usage:
@@ -166,7 +185,7 @@ async def complete(
     fallbacks: Sequence[str] = (),
 ) -> str:
     """One-shot completion. Returns the response text."""
-    msgs = _with_system([{"role": "user", "content": prompt}], system)
+    msgs = _redact_outgoing(_with_system([{"role": "user", "content": prompt}], system))
     resp = await _call_with_retry(
         lambda: get_client().chat.completions.create(
             model=model,
@@ -192,11 +211,12 @@ async def run_turn(
     """One turn of a tool-use loop. The caller inspects `stop_reason`, executes
     any `tool_requests`, appends the tool results + `assistant_message` to
     history, and calls again."""
+    msgs = _redact_outgoing(_with_system(messages, system))
     resp = await _call_with_retry(
         lambda: get_client().chat.completions.create(
             model=model,
             max_tokens=max_tokens,
-            messages=_with_system(messages, system),
+            messages=msgs,
             tools=tools,
             extra_body=_extra_body(model, fallbacks, reasoning_effort),
         ),
@@ -274,7 +294,7 @@ async def parse[M: BaseModel](
     Retries a refusal / truncation / off-schema / no-choice response, then raises
     `LLMParseError` (callers that can degrade — the loop's synthesis — catch it)."""
     settings = get_settings()
-    msgs = _with_system(messages, system)
+    msgs = _redact_outgoing(_with_system(messages, system))
     extra_body = _extra_body(model, fallbacks, None)
     # only route to endpoints that honour response_format — else a free model
     # cheerfully replies in prose

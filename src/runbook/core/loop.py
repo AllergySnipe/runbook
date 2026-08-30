@@ -18,9 +18,14 @@ Safety branches now in place:
   cheap second-model pass can only tighten. The run gets a `disposition`:
   `auto` / `needs-approval` / `escalate`.
 
+Redaction (S5, ADR-0011) runs at two points here: each tool result is scrubbed
+before it enters the message history *and* the audit record, and the retrieved
+runbook text is scrubbed before it goes in the prompt — so `_check_grounding`
+verifies quotes against exactly what the model saw. `llm.py` re-scrubs every
+outgoing message as the structural backstop.
+
 `diagnose()` returns a `DiagnoseResult` and touches no DB — the CLI persists it
-(the S1 approval gate + S6 audit record, `core/store.py`). Still to come:
-redaction (S5), tracing.
+(the S1 approval gate + S6 audit record, `core/store.py`). Still to come: tracing.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +45,7 @@ from .. import llm
 from ..config import get_settings
 from ..prompts import load as load_prompt
 from ..rag import RetrievedChunk, retrieve
+from ..redact import RedactionSpan, redact
 from ..sim import load_scenario
 from ..tools import SCHEMAS, run_tool
 from . import events as ev
@@ -102,6 +109,7 @@ class DiagnoseResult:
     grounding_issues: list[GroundingIssue]
     usage: dict[str, int]
     elapsed_s: float
+    redaction_count: int = 0  # secrets/PII scrubbed from tool output this run (S5)
 
     @property
     def short_circuited(self) -> bool:
@@ -195,16 +203,24 @@ def _emit_tool_calls(emit: Callable[[Event], None], sink: list[ToolCall], since:
 
 
 def _tool_results_for(
-    requests: list[llm.ToolRequest], scenario: str, sink: list[ToolCall]
+    requests: list[llm.ToolRequest],
+    scenario: str,
+    sink: list[ToolCall],
+    redactions: list[RedactionSpan],
 ) -> list[dict]:
-    """Execute each requested tool, record it in `sink`, and return one
-    OpenAI-shape `tool` message per call (to append to the message history)."""
+    """Execute each requested tool, **redact its result** (S5 — tool output is
+    untrusted and the classic place a connection string or bearer token leaks),
+    record the scrubbed result in `sink`, and return one OpenAI-shape `tool`
+    message per call. The scrubbed text is what enters both the message history
+    and the audit record; spans land in `redactions`."""
     messages = []
     for req in requests:
         args = dict(req.arguments)
         payload, is_error = run_tool(req.name, scenario, args)
-        sink.append(ToolCall(req.name, args, payload, is_error))
-        messages.append({"role": "tool", "tool_call_id": req.id, "content": payload})
+        scrubbed = redact(payload)
+        redactions.extend(scrubbed.spans)
+        sink.append(ToolCall(req.name, args, scrubbed.text, is_error))
+        messages.append({"role": "tool", "tool_call_id": req.id, "content": scrubbed.text})
     return messages
 
 
@@ -275,6 +291,11 @@ async def diagnose(
     )
 
     runbook_text, runbook_source = _assemble_runbook(retrieved)
+    # S5 ∩ S3 (ADR-0011): scrub the runbook before it goes in the prompt, then
+    # ground against this same scrubbed copy — the check must verify quotes
+    # against exactly what the model saw. In practice a no-op for the synthetic
+    # corpus; load-bearing if a retrieved postmortem carries a private IP.
+    runbook_text = redact(runbook_text).text
     system = load_prompt("diagnose", runbook_source=runbook_source, runbook_text=runbook_text)
 
     low_prior_note = (
@@ -297,6 +318,7 @@ async def diagnose(
     ]
 
     tool_calls: list[ToolCall] = []
+    redactions: list[RedactionSpan] = []
     usage = {"input_tokens": 0, "output_tokens": 0}
     iterations = 0
     hit_max = False
@@ -315,17 +337,28 @@ async def diagnose(
             if iterations >= max_iters:
                 hit_max = True
                 # answer the pending tool calls so history stays valid, then stop
-                messages.extend(_tool_results_for(turn.tool_requests, scenario_name, tool_calls))
+                messages.extend(
+                    _tool_results_for(turn.tool_requests, scenario_name, tool_calls, redactions)
+                )
                 _emit_tool_calls(emit, tool_calls, before)
                 break
             results = await asyncio.to_thread(
-                _tool_results_for, turn.tool_requests, scenario_name, tool_calls
+                _tool_results_for, turn.tool_requests, scenario_name, tool_calls, redactions
             )
             messages.extend(results)
             _emit_tool_calls(emit, tool_calls, before)
             continue
 
         break  # stop / length / other — move to synthesis with what we have
+
+    if redactions:
+        emit(
+            ev.event(
+                ev.REDACTION,
+                count=len(redactions),
+                kinds=dict(Counter(s.kind for s in redactions)),
+            )
+        )
 
     def _account(u) -> None:
         usage["input_tokens"] += u.input_tokens
@@ -351,6 +384,7 @@ async def diagnose(
             grounding_issues=[],
             usage=usage,
             elapsed_s=round(time.monotonic() - started, 1),
+            redaction_count=len(redactions),
         )
 
     async def _synthesize(extra: str | None = None) -> Diagnosis | None:
@@ -476,4 +510,5 @@ async def diagnose(
         grounding_issues=grounding_issues,
         usage=usage,
         elapsed_s=round(time.monotonic() - started, 1),
+        redaction_count=len(redactions),
     )
