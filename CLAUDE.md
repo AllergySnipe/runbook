@@ -39,11 +39,10 @@ incidents go in the prompt as **context, never a grounding source** (S3 unchange
 `memory_similarity_floor` 0.88 (calibrated — catches recurrences of the same incident, silent
 otherwise). `incident_runs.memories` (S6). `events.SCHEMA_VERSION → 4` (`memory.hit`). Flywheel:
 `runbook promote <run_id>` renders a golden `EvalCase` stub from a real run (seeded from the
-confirmed outcome, labels TODO — human reviews + commits, never auto-appended);
-`.github/workflows/redteam.yml` runs `runbook redteam --gate` on any PR touching a defence
-surface + a weekly cron (secrets-gated, not `ci.yml`); the gate fails only on a regression vs
-`redteam/baseline.json` (log-surface success / new hole / residual worsened), not on the
-documented residuals. Prod-verified (`run_a59ce5c8` memory hit).
+confirmed outcome, labels TODO — human reviews + commits, never auto-appended). The red-team
+half of the flywheel was tried as a CI gate and removed — too noisy to gate on the free tier
+(ADR-0016 §2); `runbook redteam` stays a manual point-in-time tool. Prod-verified
+(`run_a59ce5c8` memory hit).
 
 **Week 3 not started:** Langfuse tracing · `/security` dashboard page. Nothing executes on
 approval — no state-changing tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync
@@ -102,7 +101,7 @@ src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db
                    tools.py (read-only tools + schemas + allowlist),
                    core/ (triage + loop + guardrail + store + events), prompts/ (versioned),
                    evals/ (golden set + scorers + judge + runner + report + baseline.json),
-                   redteam/ (log-injection harness: attacks + inject + ablate + detect + report + baseline),
+                   redteam/ (log-injection harness: attacks + inject + ablate + detect + report),
                    web_api.py (REST + SSE — the dashboard backend)
 web/               Vite + React + Tailwind SPA; `npm run build` → web/dist/ (served by app.py).
                    src/{layouts,routes,components,content,lib}; components/evidence/ = native
@@ -134,7 +133,7 @@ uv run runbook sim <action> <scenario> [...]            inspect the sim (list|sh
 uv run runbook eval [--scenario N] [--no-judge] [-j N]  golden eval set → real loop → scorecard vs baseline
 uv run runbook eval --update-baseline                   on a clean run, re-bless evals/baseline.json
 uv run runbook eval --bless eval-results/<run>.json      bless a prior --json run without re-running
-uv run runbook redteam [--condition both] [--gate] [--json P]  log-injection red-team → ASR (--gate: CI regression check vs redteam/baseline.json)
+uv run runbook redteam [--condition both] [-j N] [--json P]  log-injection red-team → ASR, baseline vs hardened (manual; not in CI)
 
 cd web && npm install && npm run dev                    dashboard dev server (:5173, proxies /api → :8000)
 cd web && npm run build                                 build the SPA into web/dist/ (app.py then serves it)

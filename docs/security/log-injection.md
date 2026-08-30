@@ -171,18 +171,10 @@ attacked scenario (benign log noise — establishes the clean-run disposition th
    structural defence; the human in the approval loop and the eval set's
    `failure_mode_exact` metric are the ongoing signals.
 
-**Re-run** after any change to `prompts/*`, `core/guardrail.py`, `core/triage.py`,
-or retrieval: `runbook redteam --condition both --json redteam-results/<run>.json`,
-then refresh section 3. Not in `ci.yml` (real model calls — ADR-0012 §4), but
-`.github/workflows/redteam.yml` runs `runbook redteam --gate` automatically on any
-PR touching one of those surfaces (ADR-0016), plus a weekly cron for out-of-path
-drift. On-demand: the `red-team` workflow's *Run workflow* button.
-
-The **gate** (`--gate`) fails only on a regression vs `redteam/baseline.json`: a
-`log`-surface success, a *new* succeeding attack, or one of the residuals above
-resolving less safely than baselined (e.g. `fake-runbook-inject-drop` dropping
-from `needs-approval` to `auto`). The residuals themselves — `fake-runbook-exfil`,
-`fake-runbook-inject-drop`, `direct-auto-approve` — are in the baseline and do not
-fail it. If a change legitimately shifts the accepted set, re-bless:
-`runbook redteam --condition hardened --json redteam-results/<run>.json` then
-`runbook redteam --bless redteam-results/<run>.json`, and commit `baseline.json`.
+**Re-run** — by hand — after any change to `prompts/*`, `core/guardrail.py`,
+`core/triage.py`, or retrieval: `runbook redteam --condition both --json
+redteam-results/<run>.json`, then refresh section 3 and diff the report against
+the previous `redteam-results/`. Not in CI: real model calls (ADR-0012 §4), and
+on the free-tier models an attack's disposition swings `auto`↔`needs-approval`
+run-to-run, so a single run is too noisy to gate on — a CI gate was built,
+tried, and removed (ADR-0016 §2).

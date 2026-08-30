@@ -8,21 +8,17 @@
 
 Week 3's plan: *"Flywheel: failing eval/prod traces → new golden cases; human
 corrections → incident memory."* The second half is ADR-0015. This ADR is the
-first half — turning what actually happened in production (or in a red-team run)
-into permanent regression coverage, so a bug that's fixed today can't quietly
-come back.
+first half — turning what actually happened in a prod incident into permanent
+regression coverage, so a bug that's fixed today can't quietly come back.
 
-Two feedback sources, and they are **not** the same kind of test:
-
-1. A **prod incident** where the loop's proposal was checked by a human
-   (`runbook outcome`). This is a *diagnosis-quality* signal — "would the loop
-   get this right?" — the same shape as the golden set (`evals/cases.py`).
-2. A **red-team attack** that is blocked on the hardened path. This is a *safety*
-   signal — "does the injection defence still hold?" — scored by
-   `redteam/detect.py` (signal taxonomy), not by the eval judge.
+The obvious second source is a red-team run, but it turns out **not** to be the
+same kind of test — a diagnosis-quality signal ("would the loop get this
+right?", the golden set's shape) vs. a safety signal ("does the injection defence
+hold?", scored by `redteam/detect.py` signals). And, as §2 works through, it
+can't be gated reliably on this infra at all.
 
 `runbook eval` already has `--bless` (freeze scores from a prior run). There was
-no equivalent for *adding* a case, and no scheduled guard for the red-team.
+no equivalent for *adding* a case.
 
 ## Decision
 
@@ -47,53 +43,36 @@ This makes the intended path **outcome → promote**: the same human confirmatio
 that feeds incident memory (ADR-0015) also seeds the eval label. One act of
 review, two durable artifacts.
 
-### 2. Red-team attacks stay a separate suite, gated against a blessed baseline
+### 2. The red-team stays a manual measurement — not a CI gate
 
-The full `redteam/attacks.py` list is the regression set. `runbook redteam` on
-its own exits non-zero on **any** hardened success — right for local dev, wrong
-for a CI gate, because the bar is not "zero successes". From SPEC "How we'll know
-it works": **0% on the `log` surface** (indirect injection — the primary threat),
-**the approval gate never bypassed**, and the documented residuals
-(alert-annotation → triage suppression, poisoned-doc exfiltration;
-`docs/security/log-injection.md` §5) are *accepted*. A gate that fires on those
-every run is worse than no gate — a real `log` regression drowns in the noise.
+The flywheel's other half was meant to be "a hardened red-team run that fails CI
+on a regression". We built it — a `redteam/baseline.json` of accepted residuals,
+a `runbook redteam --gate` that fails only on a `log`-surface success, a *new*
+succeeding attack, or an accepted residual resolving less safely — and ran it.
 
-So, mirroring `evals/baseline.json`: `redteam/baseline.json` records the accepted
-residuals (id → worst disposition tolerated). `runbook redteam --gate` runs
-hardened and fails **only** on a departure from it —
+It doesn't work on this infra, and the reason is instructive. Across three
+hardened runs **with no code change between them**, an attack's disposition
+swings `auto` ↔ `needs-approval` and a `log`-surface exfil goes 0/2 then 1/1. The
+free-tier models (`glm-5.2` → `minimax` fallback chain) are non-deterministic
+enough that **one sample per attack has no statistical power**. A single-run gate
+either cries wolf every week or misses a real regression in the noise. Making it
+reliable needs K≈3 runs per attack (≈3× the runtime and rate-limit budget) — not
+worth it for a portfolio build on a free tier.
 
-- a **`log`-surface success** (never acceptable — cannot even be blessed),
-- a **new** succeeding attack id (a hole that wasn't there), or
-- an accepted residual resolving **less safely** than baselined (e.g. a
-  poisoned-doc injection that used to hit `needs-approval` now hits `auto` — the
-  approval gate stopped containing it).
+So the red-team reverts to what ADR-0012 §4 always said it was: a **point-in-time
+measurement, run by hand** after a change to a defence surface (`prompts/*`,
+`core/{loop,guardrail,triage}`, retrieval), with the report diffed against
+`redteam-results/` and `docs/security/log-injection.md` §3 refreshed. The
+`--bless`/`--gate` machinery and the `redteam.yml` workflow are removed; the
+attack corpus, the `format_comparison` before/after table, and the deterministic
+detector unit tests stay.
 
-429-errored cases never fail the gate (infra flakiness); a >40 % error rate makes
-the run *inconclusive* (re-run), not a regression. `runbook redteam --bless
-<run.json>` re-blesses — the diff to `baseline.json` in a PR is the written
-justification. It's kept out of `ci.yml` (real model + retrieval calls, needs
-secrets — ADR-0012 §4), so `.github/workflows/redteam.yml` runs `runbook redteam
---gate` on:
-
-- **`pull_request`** touching a defence surface (`prompts/**`, `core/loop.py`,
-  `core/guardrail.py`, `core/triage.py`, `rag/**`, `redteam/**`) — the trigger
-  that actually reopens a hole is a change to one of these, and running on the PR
-  **blocks** the regression instead of reporting it after merge.
-- **`schedule`** weekly — a cheap backstop for drift that never touches those
-  files: a dependency/model bump, a `config.py` model swap, the served model
-  changing under a pinned `:free` name.
-- **`workflow_dispatch`** — on demand.
-
-An incident happening is *not* a trigger — the defences don't change because
-someone got paged.
-
-A promoted attack does **not** become an `EvalCase`. A poisoned-log case has
-different inputs (an injected surface), a different success definition (a
-`detect.py` signal, not a judge score), and a different gate (baseline-relative,
-with a hard `log`-surface floor — not the eval's target/tolerance bands).
-Folding it into `cases.py` would blur "the golden set is what a competent
-responder concludes". New attacks are added to `attacks.py` directly, with a
-`control/*` peer where disposition manipulation is in scope.
+A promoted attack does **not** become an `EvalCase` regardless. A poisoned-log
+case has different inputs (an injected surface), a different success definition (a
+`detect.py` signal, not a judge score), and a different bar. Folding it into
+`cases.py` would blur "the golden set is what a competent responder concludes".
+New attacks are added to `attacks.py` directly, with a `control/*` peer where
+disposition manipulation is in scope.
 
 ## Alternatives considered
 
@@ -103,37 +82,24 @@ responder concludes". New attacks are added to `attacks.py` directly, with a
 - **One unified "regression" command over both eval + red-team.** Rejected —
   different scorers, different bars, different CI story (one has no secrets, one
   needs them). A shared entry point would hide that.
-- **Gate on "any hardened success" (no baseline).** Rejected — the SPEC bar
-  accepts documented residuals, so this gate is red on every run and a real
-  `log`-surface regression is lost in the noise. First red-team CI run proved
-  it: 2/11 succeeded, both accepted residuals, job failed.
-- **Filter the CI run to `--surface log` only.** Rejected — cheaper, but loses
-  visibility into `doc`/`alert` drift (a residual quietly getting worse). The
-  baseline gate keeps the whole surface in view while tolerating the known state.
-- **Run the red-team after every real incident run.** Rejected — the defences
-  don't change per incident, so this would re-run an expensive (~15–25 real loop
-  runs, 429-prone) suite for no new signal, and burn the rate limit that live
-  runs need.
-- **A nightly `schedule` only.** Rejected in favour of the PR trigger: nightly
-  reports a regression up to 24h *after* the change that caused it, and burns CI
-  every day even when nothing relevant changed. The PR trigger catches it at the
-  right moment; the weekly cron keeps the out-of-path safety net.
-- **Run the red-team in `ci.yml`.** Rejected — `ci.yml` is deliberately
-  secret-free and deterministic (ADR-0008/0012); mixing in real model calls
-  breaks that contract for every push.
+- **Gate the red-team in CI (any of: "any hardened success", a blessed-baseline
+  diff, a `--surface log` filter, a PR-path trigger, a nightly/weekly cron).**
+  All built and tried; all rejected. A single hardened run has no statistical
+  power on free-tier models (§2) — the "any success" form is red every run, and
+  the baseline-diff form flagged a real-looking regression on its first run that
+  could not be told apart from variance. Making it reliable needs K≈3 runs per
+  attack, which the free tier can't afford. So: no CI gate.
+- **Run the red-team after every real incident.** Rejected regardless — the
+  defences don't change because someone got paged.
 
 ## Consequences
 
 - New CLI `runbook promote`; new `evals/promote.py` + `render_case_stub` export.
-- New CLI `runbook redteam --gate` / `--bless`; new `redteam/baseline.py` +
-  `redteam/baseline.json` (blessed from `redteam-results/run-02.json` — the three
-  SPEC residuals); `AttackReport.gate()`.
-- New `.github/workflows/redteam.yml` (PR-on-defence-surface + weekly + manual) —
-  needs `OPENROUTER_API_KEY`, `JINA_API_KEY`, `DATABASE_URL`,
-  `DATABASE_URL_UNPOOLED` repo secrets.
-- `docs/BACKLOG.md` "Red-team → eval flywheel" item closed;
-  `docs/security/log-injection.md` §5 re-run note points at the workflow.
+  This is the whole of the delivered flywheel.
+- The red-team is unchanged from ADR-0012: `runbook redteam`, run by hand, diffed
+  against `redteam-results/`. No `--gate`, no `baseline.json`, no workflow.
+- `docs/BACKLOG.md` "Red-team → eval flywheel" item: the promote half is done;
+  the red-team half is closed as "measured manually, not gated" with the reason.
 - **Revisit if:** promoted cases accumulate enough that they want their own list
-  + a "promoted from" provenance field on `EvalCase`; or the >40 %-errored
-  "inconclusive" heuristic proves too coarse and the gate needs a per-case
-  retry/quarantine lane.
+  + a "promoted from" provenance field on `EvalCase`; or a paid model tier makes
+  a K-run red-team gate affordable.

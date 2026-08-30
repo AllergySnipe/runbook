@@ -26,11 +26,12 @@ Things we've deliberately decided to do *later*, so they don't clog the current 
   corpus-jailed synthetic runbooks as hydration-eligible; or sign the synthetic corpus at
   ingest and check the signature here. Tracked from ADR-0012's residual-risk note.
 
-- ~~**Red-team → eval flywheel**~~ — done (ADR-0016). Two mechanisms: `runbook promote
-  <run_id>` renders a golden `EvalCase` stub from a real incident run (seeded from the
-  human-confirmed `runbook outcome`, labels marked TODO — the human reviews + commits); and
-  `.github/workflows/redteam.yml` runs `runbook redteam --gate` on any PR touching a defence
-  surface (`prompts/**`, `core/loop|guardrail|triage`, `rag/**`, `redteam/**`, `embed|jina`)
-  plus a weekly cron. The gate fails only on a regression vs `redteam/baseline.json` — a
-  `log`-surface success, a new succeeding attack, or an accepted residual resolving less safely.
-  Red-team attacks stay a separate suite (different scorers + bar), not folded into `cases.py`.
+- **Red-team → eval flywheel** — the prod→eval half is done (ADR-0016): `runbook promote
+  <run_id>` renders a golden `EvalCase` stub from a real incident run, seeded from the
+  human-confirmed `runbook outcome` (labels marked TODO — the human reviews + commits). The
+  red-team half is **closed as "measured manually, not gated"**: a CI gate was built (a
+  `redteam/baseline.json` of accepted residuals + `runbook redteam --gate` + a workflow) and
+  removed — a single hardened run has no statistical power on free-tier models (dispositions
+  swing `auto`↔`needs-approval` run-to-run), and a reliable K≈3-run gate isn't affordable on
+  a free tier. Red-team stays a point-in-time tool, diffed against `redteam-results/` by hand.
+  Revisit on a paid model tier.
