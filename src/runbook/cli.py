@@ -81,17 +81,30 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     """alert → retrieve runbook → tool-use investigation → grounded diagnosis."""
     import asyncio
 
+    from . import obs
     from .core import diagnose
-    from .core.cost import estimate_cost
     from .sim import load_scenario
 
     sc = load_scenario(args.scenario)
     alert = args.alert or f"{sc.alert or 'incident'} — {sc.summary.strip()}"
 
-    result = asyncio.run(diagnose(alert, args.scenario, k=args.k, use_cache=True, use_memory=True))
+    obs.setup()  # Langfuse tracing — a no-op without keys / kill-switch (ADR-0017)
+    try:
+        result = asyncio.run(
+            diagnose(alert, args.scenario, k=args.k, use_cache=True, use_memory=True)
+        )
+    finally:
+        obs.flush()  # short-lived process — push the trace before we exit
+    return _render_diagnosis(result, alert)
+
+
+def _render_diagnosis(result, alert: str) -> int:
+    from .core.cost import estimate_cost
 
     print(f"\nalert:    {alert}")
     print(f"scenario: {result.scenario}")
+    if result.langfuse_trace_url:
+        print(f"trace:    {result.langfuse_trace_url}")
     t = result.triage
     print(f"triage:   {t.category}  ({t.confidence})  — {t.rationale}")
     if result.cache_hit:
@@ -227,6 +240,8 @@ def _cmd_run_show(args: argparse.Namespace) -> int:
         return 1
 
     print(f"run {r.id}   {r.created_at:%Y-%m-%d %H:%M:%S}   status: {r.status}")
+    if r.langfuse_trace_url:
+        print(f"  trace:      {r.langfuse_trace_url}")
     print(f"  scenario:   {r.scenario}")
     print(f"  alert:      {r.alert}")
     print(f"  triage:     {r.triage_category} ({r.triage_confidence}) — {r.triage_rationale}")

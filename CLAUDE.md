@@ -51,7 +51,19 @@ from the image), blessed by `runbook redteam --condition both --bless` (parallel
 by surface/goal (baseline vs hardened), attacks-that-got-through + containment, defence stack,
 residual risks. Narrative canonical in `docs/security/log-injection.md`. 302 tests green locally.
 
-**Week 3 not started:** Langfuse tracing. Nothing executes on approval — no state-changing
+**Week 3 — Langfuse tracing** (ADR-0017, `migrations/0012`): `src/runbook/obs.py` is the one
+integration point — a **no-op unless `obs.setup()` ran** (CLI `diagnose` + the web app only;
+never evals/red-team). `llm.py` imports its client from `langfuse.openai` → every model call
+is auto-traced as a *generation* (named by role via a `trace_name=` kwarg). `core/loop.py`'s
+public `diagnose` opens the root trace and delegates to `_diagnose`, which carries typed child
+spans (`triage` / `retrieve` / `retrieve-memory` / `tool-loop` / `synthesize` / `guardrail`).
+S5: `Langfuse(mask=…, mask_otel_spans=…)` route every trace field through `redact.redact()` —
+backstopping `llm._redact_outgoing`. `incident_runs.langfuse_trace_id` + `_trace_url` link the
+audit row to the trace; the dashboard IncidentDetail shows a "trace ↗" link. Langfuse **Cloud
+hobby tier** (US region), `LANGFUSE_ENVIRONMENT` = development locally / production on Render.
+Prod-verified. **Online scoring is not built** (the `obs.score()` stub is the seam).
+
+**Not built:** online scoring on sampled runs. Nothing executes on approval — no state-changing
 tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync (blocking HTTP, only via
 `asyncio.to_thread` / CLI). Check before assuming a module exists.
 
@@ -79,9 +91,10 @@ tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync (blocking HTTP, 
   applier (Week 1).
 - **Pydantic** for all model-facing structured output; **pydantic-settings** for config
   (`src/runbook/config.py`, lazy via `get_settings()`).
-- **Langfuse** — planned for Week 3 (per-run trace inspection, online scoring, $/incident).
-  Not built yet; the eval set + per-run `usage` accounting cover the "is it working / what
-  does it cost" signal for the CLI phase.
+- **Langfuse** (v4, Cloud hobby tier) — LLM tracing, ADR-0017. One trace per `diagnose()`
+  run; `src/runbook/obs.py` is the one call site (no-op without keys / when `setup()` wasn't
+  called). Auto-instruments model calls via `langfuse.openai`; manual typed spans for the
+  loop's phases. Online scoring not built.
 - **Docker** — single image; listens on `$PORT` (`8000` locally).
   Deploy: Render (Docker), `render.yaml` Blueprint, git-push-to-deploy on `main`.
 - Frontend: **Vite + React + Tailwind + react-router** in `web/`, built into `web/dist/`,
@@ -102,7 +115,8 @@ docs/              SPEC, ADRs, backlog
 migrations/        plain .sql files, applied by `runbook migrate`
 corpus/synthetic/  hand-written paymentsvc runbooks (committed; part of the corpus)
 data/raw/          ingest cache — fetched tarballs + postmortem text (gitignored)
-src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db.py,
+src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site),
+                   obs.py (one Langfuse-tracing call site), db.py,
                    cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
                    rag/ (hybrid retrieve + rerank), sim/ (fixture env + scenarios/),
                    tools.py (read-only tools + schemas + allowlist),

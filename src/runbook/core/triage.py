@@ -129,5 +129,6 @@ async def triage(alert: str | dict, *, model: str | None = None) -> TriageResult
         system=system,
         schema=TriageResult,
         fallbacks=settings.structured_fallbacks,
+        trace_name="triage",
     )
     return result

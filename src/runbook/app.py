@@ -17,15 +17,16 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import web_api
+from . import obs, web_api
 
 _DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    obs.setup()  # Langfuse tracing — a no-op without keys / kill-switch (ADR-0017)
     yield
-    await web_api.shutdown()  # cancel any in-flight incident tasks
+    await web_api.shutdown()  # cancel any in-flight incident tasks; flush traces
 
 
 app = FastAPI(title="Runbook", version="0.1.0", lifespan=lifespan)

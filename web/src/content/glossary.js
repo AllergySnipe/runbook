@@ -139,4 +139,8 @@ export const GLOSSARY = {
     title: "Attack success rate (ASR)",
     body: "The fraction of attack attempts that achieved the attacker's declared goal (flip a disposition, inject an action, exfiltrate a token, hijack the root cause, escape the tool allowlist). Reported overall, by goal, and by surface; control cases are excluded.",
   },
+  tracing: {
+    title: "Tracing (observability)",
+    body: "One Langfuse trace per run: a nested timeline of every model call (prompt, tokens, latency, cost) and step (triage, retrieve, tool-loop, synthesis, guardrail). The audit record says what a run decided; the trace shows how — which call was slow, what the model saw. Secrets are masked before a trace leaves the process (S5).",
+  },
 };

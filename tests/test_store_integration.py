@@ -140,3 +140,25 @@ def test_resolving_a_terminal_run_is_a_noop(cleanup):
     cleanup.append(run.id)
     after = resolve_approvals(run.id, decision="approve", by="tester")
     assert after.status == "resolved"  # unchanged, no error
+
+
+def test_langfuse_trace_link_round_trips(cleanup):
+    """The Langfuse trace id / URL persist and read back (ADR-0017). NULL when
+    tracing was off (the default `DiagnoseResult` — every pre-slice row)."""
+    from runbook.core import get_run
+
+    off = record_run(_result("auto", [("Check X", "q", "read-only")]))
+    cleanup.append(off.id)
+    assert off.langfuse_trace_id is None and off.langfuse_trace_url is None
+
+    result = _result("auto", [("Check X", "q", "read-only")])
+    result.langfuse_trace_id = "0123456789abcdef0123456789abcdef"
+    result.langfuse_trace_url = (
+        "https://cloud.langfuse.com/project/p/traces/0123456789abcdef0123456789abcdef"
+    )
+    on = record_run(result)
+    cleanup.append(on.id)
+
+    fetched = get_run(on.id)
+    assert fetched.langfuse_trace_id == "0123456789abcdef0123456789abcdef"
+    assert fetched.langfuse_trace_url.endswith("/traces/0123456789abcdef0123456789abcdef")

@@ -29,14 +29,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
-import openai
+from langfuse.openai import AsyncOpenAI  # drop-in wrapper: auto-traces every call (ADR-0017)
 from openai import APIConnectionError, APIStatusError, RateLimitError
 from pydantic import BaseModel, ValidationError
 
 from .config import get_settings
 from .redact import redact as _redact
 
-_client: openai.AsyncOpenAI | None = None
+_client: AsyncOpenAI | None = None
 
 _RETRYABLE_STATUS = {408, 409, 429, 500, 502, 503, 504}
 
@@ -77,11 +77,11 @@ class Turn:
     assistant_message: dict = field(default_factory=dict)
 
 
-def get_client() -> openai.AsyncOpenAI:
+def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
         s = get_settings()
-        _client = openai.AsyncOpenAI(
+        _client = AsyncOpenAI(
             base_url=s.openrouter_base_url,
             api_key=s.openrouter_api_key,
             default_headers={"HTTP-Referer": s.openrouter_referer, "X-Title": s.openrouter_title},
@@ -193,8 +193,10 @@ async def complete(
     system: str | None = None,
     max_tokens: int = 512,
     fallbacks: Sequence[str] = (),
+    trace_name: str = "complete",
 ) -> str:
-    """One-shot completion. Returns the response text."""
+    """One-shot completion. Returns the response text. `trace_name` labels the
+    generation in Langfuse (ADR-0017); the wrapper strips it before the API call."""
     msgs = _redact_outgoing(_with_system([{"role": "user", "content": prompt}], system))
     resp = await _call_with_retry(
         lambda: get_client().chat.completions.create(
@@ -202,6 +204,7 @@ async def complete(
             max_tokens=max_tokens,
             messages=msgs,
             extra_body=_extra_body(model, fallbacks, None),
+            name=trace_name,
         ),
         what="complete",
     )
@@ -217,6 +220,7 @@ async def run_turn(
     max_tokens: int = 2048,
     reasoning_effort: str | None = None,
     fallbacks: Sequence[str] = (),
+    trace_name: str = "tool-turn",
 ) -> Turn:
     """One turn of a tool-use loop. The caller inspects `stop_reason`, executes
     any `tool_requests`, appends the tool results + `assistant_message` to
@@ -229,6 +233,7 @@ async def run_turn(
             messages=msgs,
             tools=tools,
             extra_body=_extra_body(model, fallbacks, reasoning_effort),
+            name=trace_name,
         ),
         what="run_turn",
     )
@@ -295,6 +300,7 @@ async def parse[M: BaseModel](
     schema: type[M],
     max_tokens: int = 4096,
     fallbacks: Sequence[str] = (),
+    trace_name: str = "parse",
 ) -> tuple[M, Usage]:
     """One structured-output call. Returns `(validated instance, usage)`.
 
@@ -320,6 +326,7 @@ async def parse[M: BaseModel](
                 messages=msgs,
                 response_format=fmt,
                 extra_body=extra_body,
+                name=trace_name,
             ),
             what="parse",
         )

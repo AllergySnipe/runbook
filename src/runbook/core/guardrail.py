@@ -223,7 +223,12 @@ async def second_pass(
         }
     ]
     report, usage = await llm.parse(
-        messages, model=model, system=system, schema=SecondPassReport, fallbacks=fallbacks
+        messages,
+        model=model,
+        system=system,
+        schema=SecondPassReport,
+        fallbacks=fallbacks,
+        trace_name="guardrail-2nd-pass",
     )
     return report.concerns, usage
 

@@ -190,6 +190,10 @@ def test_happy_path_one_tool_then_answer(monkeypatch):
     assert result.guardrail.any_state_changing
     assert result.guardrail.second_pass_ran
     assert not result.guardrail.regenerated_for_grounding
+    # tracing is off in the deterministic suite (ADR-0017) — the trace wrapper is
+    # transparent: same result, no trace id/url stamped
+    assert result.langfuse_trace_id is None
+    assert result.langfuse_trace_url is None
 
 
 def test_read_only_proposal_is_auto(monkeypatch):

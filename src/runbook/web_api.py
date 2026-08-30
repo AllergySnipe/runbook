@@ -30,6 +30,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from . import obs
 from .core import events as ev
 from .core.events import Event
 from .core.loop import diagnose
@@ -123,12 +124,14 @@ async def _run_incident(run: IncidentRun, k: int) -> None:
 
 
 async def shutdown() -> None:
-    """Cancel any in-flight incident tasks — called from the app lifespan."""
+    """Cancel any in-flight incident tasks, then flush pending traces — called
+    from the app lifespan."""
     tasks = [r.task for r in _RUNS.values() if r.task and not r.task.done()]
     for t in tasks:
         t.cancel()
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.to_thread(obs.flush)
 
 
 # --- request / response models ---------------------------------------------

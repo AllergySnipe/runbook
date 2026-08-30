@@ -90,7 +90,10 @@ const DEEP = {
       <>
         The <Term term="audit-record">audit row</Term> (<strong>S6</strong>) captures the trigger,
         the retrieved set, every tool call and its result, the proposal, the guardrail verdict, token
-        usage, and each approval decision with who and when.
+        usage, and each approval decision with who and when. Alongside it, one{" "}
+        <Term term="tracing">Langfuse trace</Term> per run records the same path as a nested timeline
+        of model calls — latency, tokens, and the exact context each call saw — linked from the
+        incident page.
       </>
     ),
   },

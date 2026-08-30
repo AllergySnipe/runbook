@@ -80,6 +80,23 @@ class Settings(BaseSettings):
     memory_dedupe_threshold: float = 0.97
     memory_top_n: int = 2
 
+    # Observability — Langfuse tracing (ADR-0017). One trace per `diagnose()` run:
+    # the tool-loop model calls (auto-captured by the `langfuse.openai` wrapper in
+    # `llm.py`) nested under manual spans for triage / retrieve / tool-loop /
+    # synthesis / guardrail. `src/runbook/obs.py` is the one integration point.
+    # Empty keys ⇒ a silent no-op (CI / deterministic tests need nothing set);
+    # `langfuse_enabled` is the explicit kill-switch on top of that. S5: the
+    # `mask` / `mask_otel_spans` hooks route every trace field through
+    # `redact.redact()` before export, backstopping `llm._redact_outgoing`.
+    langfuse_enabled: bool = True
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+    langfuse_sample_rate: float = 1.0
+    # `development` locally, `production` on Render (render.yaml) — keeps local
+    # experiments out of the prod dashboards / evaluators.
+    langfuse_environment: str = "development"
+
     # Model routing (ADR-0009 — free OpenRouter models). Free `:free` endpoints
     # each sit on ONE shared provider pool and 429 often, so every role is a
     # *chain*: OpenRouter walks it on a 429/5xx (`extra_body.models`).

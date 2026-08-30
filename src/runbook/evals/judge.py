@@ -78,5 +78,6 @@ async def judge(case: EvalCase, result, *, model: str | None = None):
         system=system,
         schema=JudgeVerdict,
         fallbacks=settings.judge_fallbacks,
+        trace_name="eval-judge",
     )
     return verdict, usage

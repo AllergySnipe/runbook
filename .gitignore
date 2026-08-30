@@ -19,6 +19,11 @@ web/dist/
 .DS_Store
 .neon
 
+# Vendored agent skills (installed via `npx skills add`; not part of the app)
+.agents/
+.claude/
+skills-lock.json
+
 # Ingest cache — fetched corpus, re-downloadable
 data/raw/
 

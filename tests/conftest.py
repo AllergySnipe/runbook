@@ -16,3 +16,9 @@ import os
 
 os.environ.setdefault("OPENROUTER_API_KEY", "test-key-not-real")
 os.environ.setdefault("JINA_API_KEY", "test-key-not-real")
+
+# Langfuse tracing off for the deterministic suite — the same rule as "no real
+# model calls" (ADR-0017). A real `.env` may carry live keys locally; this env
+# var outranks the `.env` file in pydantic-settings, so tests never connect.
+# `test_obs.py` exercises the enabled path with a monkeypatched Settings instead.
+os.environ.setdefault("LANGFUSE_ENABLED", "false")

@@ -28,3 +28,12 @@ services:
         sync: false
       - key: DATABASE_URL_UNPOOLED
         sync: false
+      # Langfuse — LLM tracing (ADR-0017). Absent keys = tracing no-ops.
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_BASE_URL
+        sync: false
+      - key: LANGFUSE_ENVIRONMENT
+        value: production

@@ -119,6 +119,8 @@ class RunRecord:
     cost_usd: float = 0.0  # est. $ at paid model prices (ADR-0014)
     cache_hit: bool = False  # semantic cache served the triage + retrieval prefix
     memories: list = field(default_factory=list)  # similar past incidents shown (ADR-0015)
+    langfuse_trace_id: str | None = None  # the run's Langfuse trace, if tracing was on (ADR-0017)
+    langfuse_trace_url: str | None = None
     approvals: list[ApprovalRecord] = field(default_factory=list)
 
 
@@ -190,7 +192,7 @@ _RUN_COLS = (
     "id, alert, scenario, triage_category, triage_rationale, triage_confidence, "
     "disposition, status, diagnosis, retrieved, tool_calls, guardrail, usage, "
     "iterations, hit_max_iters, elapsed_s, created_at, resolved_at, featured, redactions, "
-    "cost_usd, cache_hit, memories"
+    "cost_usd, cache_hit, memories, langfuse_trace_id, langfuse_trace_url"
 )
 
 
@@ -219,6 +221,8 @@ def _row_to_record(row: tuple, approvals: list[tuple]) -> RunRecord:
         cost_usd=float(row[20] or 0),
         cache_hit=bool(row[21]),
         memories=row[22] or [],
+        langfuse_trace_id=row[23],
+        langfuse_trace_url=row[24],
         approvals=[
             ApprovalRecord(
                 id=a[0],
@@ -295,12 +299,12 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
                 id, alert, scenario, triage_category, triage_rationale, triage_confidence,
                 disposition, status, diagnosis, retrieved, tool_calls, guardrail,
                 usage, iterations, hit_max_iters, elapsed_s, redactions, cost_usd,
-                cache_hit, memories, resolved_at
+                cache_hit, memories, langfuse_trace_id, langfuse_trace_url, resolved_at
             ) values (
                 %s, %s, %s, %s, %s, %s,
                 %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
                 %s::jsonb, %s, %s, %s, %s, %s,
-                %s, %s::jsonb, {"now()" if status in TERMINAL else "null"}
+                %s, %s::jsonb, %s, %s, {"now()" if status in TERMINAL else "null"}
             )
             on conflict (id) do update set
                 alert = excluded.alert, scenario = excluded.scenario,
@@ -314,6 +318,8 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
                 hit_max_iters = excluded.hit_max_iters, elapsed_s = excluded.elapsed_s,
                 redactions = excluded.redactions, cost_usd = excluded.cost_usd,
                 cache_hit = excluded.cache_hit, memories = excluded.memories,
+                langfuse_trace_id = excluded.langfuse_trace_id,
+                langfuse_trace_url = excluded.langfuse_trace_url,
                 resolved_at = excluded.resolved_at
             """,
             (
@@ -337,6 +343,8 @@ def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecor
                 cost_usd,
                 result.cache_hit,
                 json.dumps(_memories_json(result.memories)),
+                result.langfuse_trace_id,
+                result.langfuse_trace_url,
             ),
         )
         for v in gated:

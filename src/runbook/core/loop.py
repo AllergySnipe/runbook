@@ -25,7 +25,9 @@ verifies quotes against exactly what the model saw. `llm.py` re-scrubs every
 outgoing message as the structural backstop.
 
 `diagnose()` returns a `DiagnoseResult` and touches no DB — the CLI persists it
-(the S1 approval gate + S6 audit record, `core/store.py`). Still to come: tracing.
+(the S1 approval gate + S6 audit record, `core/store.py`). The public `diagnose`
+wraps the run in a Langfuse trace (ADR-0017, `obs.py`) — a no-op unless
+`obs.setup()` ran; `_diagnose` holds the actual loop and its typed child spans.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .. import llm
+from .. import llm, obs
 from ..config import get_settings
 from ..embed import embed_query
 from ..prompts import load as load_prompt
@@ -52,6 +54,7 @@ from ..tools import SCHEMAS, run_tool
 from . import cache as alert_cache
 from . import events as ev
 from . import memory as incident_memory
+from .cost import estimate_cost
 from .events import Event
 from .guardrail import GuardrailReport, apply_second_pass, classify_steps, second_pass
 from .memory import MemoryHit
@@ -118,6 +121,8 @@ class DiagnoseResult:
     memories: list[MemoryHit] = field(
         default_factory=list
     )  # similar past incidents shown (ADR-0015)
+    langfuse_trace_id: str | None = None  # the run's Langfuse trace, when tracing is on (ADR-0017)
+    langfuse_trace_url: str | None = None
 
     @property
     def short_circuited(self) -> bool:
@@ -278,7 +283,56 @@ def _tool_results_for(
     return messages
 
 
+def _trace_output(r: DiagnoseResult) -> dict:
+    """The trace-level result summary (ADR-0017). What a reviewer scanning the
+    Langfuse trace list wants to see without opening the run."""
+    d = r.diagnosis
+    return {
+        "disposition": r.disposition,
+        "triage": r.triage.category,
+        "root_cause": d.root_cause if d else None,
+        "confidence": d.confidence if d else None,
+        "iterations": r.iterations,
+        "cache_hit": r.cache_hit,
+        "cost_usd": estimate_cost(r.usage.get("by_model")),
+    }
+
+
 async def diagnose(
+    alert: str,
+    scenario_name: str,
+    *,
+    k: int = 4,
+    max_iters: int = MAX_ITERS,
+    on_event: Callable[[Event], None] | None = None,
+    use_cache: bool = False,
+    use_memory: bool = False,
+) -> DiagnoseResult:
+    """Public entry: wrap one incident run in a Langfuse trace (ADR-0017 — a
+    no-op unless `obs.setup()` ran), then delegate to `_diagnose`. The trace id /
+    URL are stamped onto the result so `core/store.py` can persist the link."""
+    with obs.trace(
+        name="diagnose",
+        input={"alert": redact(alert).text, "scenario": scenario_name},
+        metadata={"use_cache": use_cache, "use_memory": use_memory, "k": k},
+        tags=["diagnose"],
+    ) as tr:
+        result = await _diagnose(
+            alert,
+            scenario_name,
+            k=k,
+            max_iters=max_iters,
+            on_event=on_event,
+            use_cache=use_cache,
+            use_memory=use_memory,
+        )
+        result.langfuse_trace_id = tr.trace_id
+        result.langfuse_trace_url = tr.trace_url
+        tr.update_output(_trace_output(result))
+        return result
+
+
+async def _diagnose(
     alert: str,
     scenario_name: str,
     *,
@@ -357,7 +411,8 @@ async def diagnose(
         )
     else:
         emit(ev.event(ev.TRIAGE_START))
-        tri = await triage(alert)
+        with obs.span("triage", input=alert):
+            tri = await triage(alert)
         emit(
             ev.event(
                 ev.TRIAGE_DONE,
@@ -388,7 +443,9 @@ async def diagnose(
             )
 
         emit(ev.event(ev.RETRIEVE_START))
-        retrieved = await asyncio.to_thread(retrieve, alert, k, query_vec=alert_vec)
+        with obs.span("retrieve", as_type="retriever", input=alert) as _rt:
+            retrieved = await asyncio.to_thread(retrieve, alert, k, query_vec=alert_vec)
+            _rt.update(output=[(c.path or c.source) for c in retrieved])
         if not retrieved:
             raise RuntimeError("retrieval returned nothing for this alert")
         emit(
@@ -414,7 +471,9 @@ async def diagnose(
     # Reuses the alert embedding; independent of a cache hit. Best-effort.
     memories: list[MemoryHit] = []
     if memory_on and alert_vec is not None:
-        memories = await asyncio.to_thread(incident_memory.search, alert_vec)
+        with obs.span("retrieve-memory", as_type="retriever", input=alert) as _mem:
+            memories = await asyncio.to_thread(incident_memory.search, alert_vec)
+            _mem.update(output=[m.entry_id for m in memories])
         if memories:
             emit(
                 ev.event(
@@ -478,32 +537,40 @@ async def diagnose(
         slot["input_tokens"] += u.input_tokens
         slot["output_tokens"] += u.output_tokens
 
-    while True:
-        iterations += 1
-        turn = await llm.run_turn(
-            messages, model=model, system=system, tools=SCHEMAS, fallbacks=loop_fallbacks
-        )
-        _account(turn.usage)
-        messages.append(turn.assistant_message)
-
-        if turn.stop_reason == "tool_calls" and turn.tool_requests:
-            before = len(tool_calls)
-            if iterations >= max_iters:
-                hit_max = True
-                # answer the pending tool calls so history stays valid, then stop
-                messages.extend(
-                    _tool_results_for(turn.tool_requests, scenario_name, tool_calls, redactions)
-                )
-                _emit_tool_calls(emit, tool_calls, before)
-                break
-            results = await asyncio.to_thread(
-                _tool_results_for, turn.tool_requests, scenario_name, tool_calls, redactions
+    with obs.span("tool-loop", as_type="agent", input={"model": model}) as _tl:
+        while True:
+            iterations += 1
+            turn = await llm.run_turn(
+                messages, model=model, system=system, tools=SCHEMAS, fallbacks=loop_fallbacks
             )
-            messages.extend(results)
-            _emit_tool_calls(emit, tool_calls, before)
-            continue
+            _account(turn.usage)
+            messages.append(turn.assistant_message)
 
-        break  # stop / length / other — move to synthesis with what we have
+            if turn.stop_reason == "tool_calls" and turn.tool_requests:
+                before = len(tool_calls)
+                if iterations >= max_iters:
+                    hit_max = True
+                    # answer the pending tool calls so history stays valid, then stop
+                    messages.extend(
+                        _tool_results_for(turn.tool_requests, scenario_name, tool_calls, redactions)
+                    )
+                    _emit_tool_calls(emit, tool_calls, before)
+                    break
+                results = await asyncio.to_thread(
+                    _tool_results_for, turn.tool_requests, scenario_name, tool_calls, redactions
+                )
+                messages.extend(results)
+                _emit_tool_calls(emit, tool_calls, before)
+                continue
+
+            break  # stop / length / other — move to synthesis with what we have
+        _tl.update(
+            output={
+                "iterations": iterations,
+                "tool_calls": [tc.name for tc in tool_calls],
+                "hit_max_iters": hit_max,
+            }
+        )
 
     if redactions:
         emit(
@@ -540,26 +607,35 @@ async def diagnose(
         )
 
     async def _synthesize(extra: str | None = None) -> Diagnosis | None:
-        msgs = [*messages]
-        if extra is None:
-            msgs.append(
-                {
-                    "role": "user",
-                    "content": load_prompt(
-                        "synthesize", runbook_source=runbook_source, runbook_text=runbook_text
-                    ),
-                }
-            )
-        else:
-            msgs.append({"role": "user", "content": extra})
-        try:
-            d, u = await llm.parse(
-                msgs, model=model, system=system, schema=Diagnosis, fallbacks=structured_fallbacks
-            )
-        except llm.LLMParseError:
-            return None
-        _account(u)
-        return d
+        span_name = "synthesize-retry" if extra is not None else "synthesize"
+        with obs.span(span_name, input={"regen": extra is not None}):
+            msgs = [*messages]
+            if extra is None:
+                msgs.append(
+                    {
+                        "role": "user",
+                        "content": load_prompt(
+                            "synthesize",
+                            runbook_source=runbook_source,
+                            runbook_text=runbook_text,
+                        ),
+                    }
+                )
+            else:
+                msgs.append({"role": "user", "content": extra})
+            try:
+                d, u = await llm.parse(
+                    msgs,
+                    model=model,
+                    system=system,
+                    schema=Diagnosis,
+                    fallbacks=structured_fallbacks,
+                    trace_name=span_name,
+                )
+            except llm.LLMParseError:
+                return None
+            _account(u)
+            return d
 
     # --- synthesis + grounding enforcement (S3) ---------------------------
     emit(ev.event(ev.SYNTHESIS_START))
@@ -602,20 +678,27 @@ async def diagnose(
 
     # --- guardrail: independent action classification + second pass ------
     emit(ev.event(ev.GUARDRAIL_START))
-    verdicts = classify_steps(diagnosis.remediation_steps, runbook_text)
-    concerns = []
-    second_pass_ran = False
-    if diagnosis.remediation_steps:
-        second_pass_ran = True
-        concerns, sp_usage = await second_pass(
-            diagnosis.remediation_steps,
-            runbook_text,
-            model=settings.triage_model,
-            fallbacks=structured_fallbacks,
+    with obs.span("guardrail", input={"n_steps": len(diagnosis.remediation_steps)}) as _gr:
+        verdicts = classify_steps(diagnosis.remediation_steps, runbook_text)
+        concerns = []
+        second_pass_ran = False
+        if diagnosis.remediation_steps:
+            second_pass_ran = True
+            concerns, sp_usage = await second_pass(
+                diagnosis.remediation_steps,
+                runbook_text,
+                model=settings.triage_model,
+                fallbacks=structured_fallbacks,
+            )
+            if sp_usage is not None:
+                _account(sp_usage)
+            apply_second_pass(verdicts, concerns)
+        _gr.update(
+            output={
+                "classifications": [v.classification for v in verdicts],
+                "concerns": len(concerns),
+            }
         )
-        if sp_usage is not None:
-            _account(sp_usage)
-        apply_second_pass(verdicts, concerns)
     guardrail = GuardrailReport(
         verdicts=verdicts,
         second_pass_concerns=concerns,
