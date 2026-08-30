@@ -11,6 +11,7 @@ runbook run <id>                         show one incident run (the audit record
 runbook approve <id> [--step N] [--by]   approve a run's pending state-changing steps
 runbook reject <id> --note "why" [--by]  reject a run (whole run → rejected)
 runbook feature <id> [--unfeature]       mark a run as a curated dashboard exemplar
+runbook outcome <id> --root-cause "…"    record the confirmed root cause as incident memory
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
 runbook eval [--scenario N] [--no-judge]  run the golden eval set through the real loop
 runbook redteam [--condition C] [-j N]    run the log-injection red-team harness
@@ -246,6 +247,20 @@ def _cmd_run_show(args: argparse.Namespace) -> int:
             note = f'  note: "{a.note}"' if a.note else ""
             print(f"    step {a.step_index + 1}: {a.state}{who}{note}")
             print(f"       {a.action}")
+    from .core import get_outcome
+
+    oc = get_outcome(r.id)
+    if oc is not None:
+        verdict = (
+            "model was right"
+            if oc.model_was_correct
+            else ("model was wrong" if oc.model_was_correct is False else "not judged")
+        )
+        print(f"\n  confirmed outcome ({oc.created_by}, {verdict}):")
+        print(f"    {oc.actual_root_cause}")
+        if oc.actual_failure_mode:
+            print(f"    failure_mode: {oc.actual_failure_mode}")
+
     if r.usage.get("by_model"):
         print("  cost by model (est. at paid prices):")
         for name, u in r.usage["by_model"].items():
@@ -302,6 +317,35 @@ def _cmd_feature(args: argparse.Namespace) -> int:
         print(f"no run {args.id!r}")
         return 1
     print(f"run {args.id}  ·  featured: {on}")
+    return 0
+
+
+def _cmd_outcome(args: argparse.Namespace) -> int:
+    """Record what actually turned out to be the root cause of a terminal run
+    (SPEC step 7). The confirmed outcome is embedded into `incident_memory` and
+    retrieved as context on future similar alerts (ADR-0015). Real embed +
+    `DATABASE_URL`."""
+    from .core import get_run, record_outcome
+
+    r = get_run(args.id)
+    if r is None:
+        print(f"no run {args.id!r}")
+        return 1
+
+    model_correct = True if args.model_correct else (False if args.model_wrong else None)
+    by = args.by or os.environ.get("USER") or "cli"
+    try:
+        res = record_outcome(
+            args.id,
+            actual_root_cause=args.root_cause,
+            actual_failure_mode=args.failure_mode,
+            model_was_correct=model_correct,
+            by=by,
+        )
+    except (LookupError, ValueError) as exc:
+        print(f"outcome: {exc}")
+        return 1
+    print(f"run {args.id}  ·  {res.summary_line()}")
     return 0
 
 
@@ -583,6 +627,24 @@ def build_parser() -> argparse.ArgumentParser:
     feature.add_argument("id", help="run id")
     feature.add_argument("--unfeature", action="store_true", help="clear the flag instead")
     feature.set_defaults(func=_cmd_feature)
+
+    outcome = sub.add_parser(
+        "outcome", help="record the confirmed root cause of a terminal run as incident memory"
+    )
+    outcome.add_argument("id", help="run id")
+    outcome.add_argument(
+        "--root-cause", required=True, help="what actually turned out to be the root cause"
+    )
+    outcome.add_argument("--failure-mode", help="the runbook failure_mode it matched, if any")
+    verdict = outcome.add_mutually_exclusive_group()
+    verdict.add_argument(
+        "--model-correct", action="store_true", help="the run's proposed root cause was right"
+    )
+    verdict.add_argument(
+        "--model-wrong", action="store_true", help="the run's proposed root cause was wrong"
+    )
+    outcome.add_argument("--by", help="who is recording this (default: $USER)")
+    outcome.set_defaults(func=_cmd_outcome)
 
     ev = sub.add_parser("eval", help="run the golden eval set through the real loop")
     ev.add_argument("--scenario", action="append", help="limit to a sim scenario (repeatable)")

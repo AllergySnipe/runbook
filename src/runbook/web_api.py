@@ -16,6 +16,7 @@ runs, and that is an accepted demo-scope tradeoff.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import re
@@ -32,6 +33,7 @@ from pydantic import BaseModel
 from .core import events as ev
 from .core.events import Event
 from .core.loop import diagnose
+from .core.memory import get_outcome, record_outcome
 from .core.store import (
     RunRecord,
     get_run,
@@ -142,6 +144,13 @@ class Decision(BaseModel):
     step: int | None = None  # 0-based step index; None targets every pending step
 
 
+class RecordOutcome(BaseModel):
+    by: str
+    actual_root_cause: str
+    actual_failure_mode: str | None = None
+    model_was_correct: bool | None = None
+
+
 # --- routes ----------------------------------------------------------------
 
 
@@ -232,7 +241,8 @@ async def get_incident(run_id: str) -> dict | RunRecord:
     rec = await asyncio.to_thread(get_run, run_id)
     if rec is None:
         raise HTTPException(404, f"no run {run_id!r}")
-    return rec
+    outcome = await asyncio.to_thread(get_outcome, run_id)
+    return {**dataclasses.asdict(rec), "outcome": dataclasses.asdict(outcome) if outcome else None}
 
 
 def _sse(e: Event) -> str:
@@ -319,6 +329,26 @@ async def reject_incident(run_id: str, body: Decision) -> RunRecord:
     if not body.note:
         raise HTTPException(422, "a note is required to reject")
     return await _resolve(run_id, "reject", body)
+
+
+@router.post("/incidents/{run_id}/outcome")
+async def record_incident_outcome(run_id: str, body: RecordOutcome) -> dict:
+    """SPEC step 7: a human records what actually turned out to be the root cause
+    of a terminal run. Stored as incident memory (ADR-0015)."""
+    try:
+        res = await asyncio.to_thread(
+            record_outcome,
+            run_id,
+            actual_root_cause=body.actual_root_cause,
+            actual_failure_mode=body.actual_failure_mode,
+            model_was_correct=body.model_was_correct,
+            by=body.by,
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return dataclasses.asdict(res)
 
 
 @router.get("/scenarios")

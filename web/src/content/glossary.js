@@ -127,4 +127,8 @@ export const GLOSSARY = {
     title: "Redaction (S5)",
     body: "Stripping secrets and PII from any text before it reaches a model provider or a trace. Specified for Runbook; not yet built.",
   },
+  "incident-memory": {
+    title: "Incident memory",
+    body: "This system's own past incidents, each with the root cause a human confirmed after resolution. Retrieved as context on future similar alerts — 'how a page like this turned out last time' — but never as a grounding source. Only human-confirmed outcomes are stored, so the loop can't reinforce its own mistakes.",
+  },
 };

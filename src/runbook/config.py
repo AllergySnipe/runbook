@@ -61,6 +61,21 @@ class Settings(BaseSettings):
     cache_similarity_threshold: float = 0.97
     cache_ttl_s: int = 3600
 
+    # Incident memory (ADR-0015). After a terminal run a human records the actual
+    # root cause (`runbook outcome` / the dashboard form); it is embedded into
+    # `incident_memory` and retrieved on future similar alerts as *context* (never
+    # a grounding source — S3 is unchanged). `memory_similarity_floor` is a real
+    # gate: below it the loop sees no similar incidents rather than a weak match.
+    # The band that separates a genuine recurrence from a merely-adjacent incident
+    # is narrow — see the calibration table in ADR-0015. `memory_dedupe_threshold`
+    # is the tight store-time bar that stops a recurring page filling memory with
+    # near-identical rows. `memory_enabled` is the prod kill-switch; the loop only
+    # consults memory when `diagnose(use_cache=...)` is on (CLI + dashboard).
+    memory_enabled: bool = True
+    memory_similarity_floor: float = 0.88
+    memory_dedupe_threshold: float = 0.97
+    memory_top_n: int = 2
+
     # Model routing (ADR-0009 — free OpenRouter models). Free `:free` endpoints
     # each sit on ONE shared provider pool and 429 often, so every role is a
     # *chain*: OpenRouter walks it on a 429/5xx (`extra_body.models`).

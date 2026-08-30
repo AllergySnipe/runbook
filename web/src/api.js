@@ -45,6 +45,14 @@ export const decide = (id, decision, body) =>
     body: JSON.stringify(body),
   }).then(json);
 
+// SPEC step 7: record the confirmed root cause of a terminal run as incident memory.
+export const recordOutcome = (id, body) =>
+  fetch(`/api/incidents/${id}/outcome`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(json);
+
 // Open the SSE progress stream for a run. `onEvent({type, data})` fires per
 // event; the returned function closes the stream. The server ends it with a
 // `finished` or `error` event — the caller then re-fetches the authoritative

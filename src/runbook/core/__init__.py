@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from .guardrail import ActionVerdict, GuardrailReport, classify_action, classify_steps
 from .loop import DiagnoseResult, Diagnosis, RemediationStep, ToolCall, diagnose
+from .memory import MemoryHit, OutcomeRecord, OutcomeResult, get_outcome, record_outcome
 from .store import (
     ApprovalRecord,
     RunRecord,
@@ -28,6 +29,9 @@ __all__ = [
     "DiagnoseResult",
     "Diagnosis",
     "GuardrailReport",
+    "MemoryHit",
+    "OutcomeRecord",
+    "OutcomeResult",
     "RemediationStep",
     "RunRecord",
     "ToolCall",
@@ -36,9 +40,11 @@ __all__ = [
     "classify_steps",
     "compute_status",
     "diagnose",
+    "get_outcome",
     "get_run",
     "list_runs",
     "mark_run_failed",
+    "record_outcome",
     "record_run",
     "record_run_start",
     "resolve_approvals",
