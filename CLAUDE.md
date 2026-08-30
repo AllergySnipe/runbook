@@ -10,34 +10,23 @@ before any state-changing action.
 
 ## Status
 
-**Weeks 0–2 done; deployed (`main` HEAD, https://runbook-cgkn.onrender.com).** Neon +
-`migrations/0001`–`0006`; `ingest/` (2102 chunks) + `embed.py` (ADR-0002); `rag/` hybrid
-retrieve + rerank (ADR-0003); `sim/` (7 scenarios) + `tools.py` (4 read-only tools + allowlist,
-ADR-0004); `core/` = `loop.py` manual tool-use loop → grounded `Diagnosis` (ADR-0005),
-`triage.py` (4-lane), `guardrail.py` (S3 enforcement + independent action classification +
-2nd pass → `disposition`, ADR-0006), `store.py` + approval gate (`compute_status()` pure,
-ADR-0007), `events.py` (progress schema). Golden eval set (ADR-0008 — 30 cases, hard S1–S3 +
-LLM-judge, `baseline.json` regression gate). Deterministic CI.
+**Weeks 0–2 done + deployed** (`main` HEAD, https://runbook-cgkn.onrender.com): Neon +
+`migrations/0001`–`0006`, `ingest`/`embed` (ADR-0002), `rag/` hybrid retrieve+rerank
+(ADR-0003), `sim/` + `tools.py` (ADR-0004), `core/` loop → triage → guardrail → approval gate
+(ADRs 0005–0007), golden eval set (ADR-0008, 30/30 blessed), dashboard REST+SSE + React SPA
+(ADR-0010), OpenRouter LLM layer (ADR-0009). Deterministic CI.
 
-**Dashboard done (ADR-0010).** `web_api.py` = the loop over REST + SSE (fire-and-forget
-`asyncio`, no job queue; in-memory `_RUNS` is disposable, Postgres is the record). `web/` =
-Vite/React SPA in two registers (editorial `/ /how-it-works /decisions`; console
-`/incidents /evals`), served by `app.py`. `/incidents/:id` renders every tool result natively
-(`components/evidence/*`) + highlights runbook quotes. `runbook feature <id>` + `?featured=1`.
+**Week 3: redaction (S5) done** — `redact.py` deterministic scrubber, two enforcement points
+(ADR-0011). **Week 3: log-injection red-team done** — `src/runbook/redteam/` + `runbook
+redteam` CLI + ADR-0012 + `docs/security/log-injection.md`. First measured result: indirect
+`log`-surface injection held 0/5 (prompt fences on *or* off); approval gate never bypassed; 3
+residual findings (alert→triage suppression, poisoned-doc exfil, a gated injected step). Not
+in CI; `tests/test_redteam.py` covers the deterministic parts.
 
-**LLM layer** = OpenRouter via `openai` SDK (ADR-0009 — provider-neutral, per-role fallback
-chains in `config.py`; `llm.py` owns retry). Blessed baseline: 30/30, deterministic 1.00,
-judge 0.91.
-
-**Redaction (S5) done (ADR-0011).** `redact.py` — deterministic scrubber (regex + Luhn +
-RFC-1918), two enforcement points: `llm.py._redact_outgoing` (choke point — every outgoing
-message) and `core/loop.py` (each tool result before it enters history + the audit record;
-runbook text before `_check_grounding`). Count persisted (`incident_runs.redactions`, `0006`)
-+ `redaction` timeline event. NER deferred — zero recall on free-form PII, accepted.
-
-**Not started:** incident memory (+ feeding root-cause notes back to eval cases), Langfuse
-tracing. Nothing executes on approval — no state-changing tools. `retrieve()`
-+ tools are sync (`asyncio.to_thread`). Check before assuming a module exists.
+**Not started:** incident memory + red-team→eval flywheel, Langfuse tracing, `/security`
+dashboard page, poisoned-doc hydration hardening (`docs/BACKLOG.md`). Nothing executes on
+approval — no state-changing tools. `retrieve()` + tools are sync. Check before assuming a
+module exists.
 
 ## Golden rules
 
@@ -89,6 +78,7 @@ src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db
                    tools.py (read-only tools + schemas + allowlist),
                    core/ (triage + loop + guardrail + store + events), prompts/ (versioned),
                    evals/ (golden set + scorers + judge + runner + report + baseline.json),
+                   redteam/ (log-injection harness: attacks + inject + ablate + detect + report),
                    web_api.py (REST + SSE — the dashboard backend)
 web/               Vite + React + Tailwind SPA; `npm run build` → web/dist/ (served by app.py).
                    src/{layouts,routes,components,content,lib}; components/evidence/ = native
@@ -119,6 +109,7 @@ uv run runbook sim <action> <scenario> [...]            inspect the sim (list|sh
 uv run runbook eval [--scenario N] [--no-judge] [-j N]  golden eval set → real loop → scorecard vs baseline
 uv run runbook eval --update-baseline                   on a clean run, re-bless evals/baseline.json
 uv run runbook eval --bless eval-results/<run>.json      bless a prior --json run without re-running
+uv run runbook redteam [--condition both] [-j N] [--json P]  log-injection red-team → ASR, baseline vs hardened
 
 cd web && npm install && npm run dev                    dashboard dev server (:5173, proxies /api → :8000)
 cd web && npm run build                                 build the SPA into web/dist/ (app.py then serves it)

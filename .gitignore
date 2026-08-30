@@ -24,3 +24,6 @@ data/raw/
 
 # Eval run artifacts (`runbook eval --json`); the committed baseline is evals/baseline.json
 eval-results/
+
+# Red-team run artifacts (`runbook redteam --json`)
+redteam-results/

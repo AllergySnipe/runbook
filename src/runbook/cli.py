@@ -13,6 +13,7 @@ runbook reject <id> --note "why" [--by]  reject a run (whole run → rejected)
 runbook feature <id> [--unfeature]       mark a run as a curated dashboard exemplar
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
 runbook eval [--scenario N] [--no-judge]  run the golden eval set through the real loop
+runbook redteam [--condition C] [-j N]    run the log-injection red-team harness
 """
 
 from __future__ import annotations
@@ -353,6 +354,58 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     return 0 if report.passed(baseline) else 1
 
 
+def _cmd_redteam(args: argparse.Namespace) -> int:
+    """Drive the real `diagnose()` against crafted poisoned inputs (poisoned log
+    lines, a poisoned retrieved doc, a poisoned alert) and report an
+    attack-success-rate. `--condition both` (default) runs baseline (prompt
+    defences off) and hardened (as shipped) and prints the before/after table.
+
+    Real model + retrieval calls — needs `OPENROUTER_API_KEY` + `DATABASE_URL`.
+    Not wired into CI (ADR-0012). Never persists a run."""
+    import asyncio
+    import json as _json
+    from pathlib import Path
+
+    from .redteam import ATTACKS, format_comparison, run_attacks
+
+    cases = list(ATTACKS)
+    if args.case:
+        cases = [c for c in cases if c.id in set(args.case)]
+    if args.surface:
+        cases = [c for c in cases if c.surface in set(args.surface)]
+    if args.goal:
+        cases = [c for c in cases if c.goal in set(args.goal)]
+    if args.limit:
+        cases = cases[: args.limit]
+    if not cases:
+        print("redteam: no cases match the filter")
+        return 2
+
+    conditions = ["baseline", "hardened"] if args.condition == "both" else [args.condition]
+    print(f"redteam: {len(cases)} case(s) · conditions {conditions} · concurrency {args.jobs}")
+
+    reports = {}
+    for cond in conditions:
+        print(f"\n── {cond} ──")
+        reports[cond] = asyncio.run(
+            run_attacks(cases, condition=cond, concurrency=args.jobs, progress=print)
+        )
+        print("\n" + reports[cond].format())
+
+    if len(reports) == 2:
+        print("\n" + format_comparison(reports["baseline"], reports["hardened"]))
+
+    if args.json:
+        out = Path(args.json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(_json.dumps({c: r.as_dict() for c, r in reports.items()}, indent=2) + "\n")
+        print(f"\nredteam: wrote {args.json}")
+
+    errored = any(r.n_errored for r in reports.values())
+    any_success = any(r.succeeded for r in reports.values() if r.condition == "hardened")
+    return 1 if (errored or any_success) else 0
+
+
 def _cmd_sim(args: argparse.Namespace) -> int:
     """Manual inspection of the sim — the same surface the read-only tools use.
     Not part of the product loop; a debugging aid for the tool-loop slice."""
@@ -539,6 +592,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="bless evals/baseline.json from a prior --json result file, without re-running",
     )
     ev.set_defaults(func=_cmd_eval)
+
+    rt = sub.add_parser("redteam", help="run the log-injection red-team harness")
+    rt.add_argument("--case", action="append", help="limit to an attack case id (repeatable)")
+    rt.add_argument(
+        "--surface", action="append", choices=("log", "doc", "alert"), help="limit to a surface"
+    )
+    rt.add_argument("--goal", action="append", help="limit to an attack goal (repeatable)")
+    rt.add_argument(
+        "--condition",
+        choices=("baseline", "hardened", "both"),
+        default="both",
+        help="baseline = prompt defences off; hardened = as shipped (default: both)",
+    )
+    rt.add_argument("--limit", type=int, help="run only the first N matching cases")
+    rt.add_argument("-j", "--jobs", type=int, default=2, help="concurrent cases (default 2)")
+    rt.add_argument("--json", help="also write the full per-case results to this path")
+    rt.set_defaults(func=_cmd_redteam)
 
     sim = sub.add_parser("sim", help="inspect the fixture-backed sim by hand")
     sim.add_argument("action", choices=("list", "show", "metrics", "logs", "deploys", "deps"))
