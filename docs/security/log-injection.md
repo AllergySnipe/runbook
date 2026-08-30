@@ -173,4 +173,7 @@ attacked scenario (benign log noise — establishes the clean-run disposition th
 
 **Re-run** after any change to `prompts/*`, `core/guardrail.py`, `core/triage.py`,
 or retrieval: `runbook redteam --condition both --json redteam-results/<run>.json`,
-then refresh section 3. Not in CI (real model calls — ADR-0012 §4).
+then refresh section 3. Not in `ci.yml` (real model calls — ADR-0012 §4), but
+`.github/workflows/redteam-nightly.yml` runs the hardened pass every day as a
+standing regression guard (ADR-0016) — a closed hole that reopens fails within a
+day. On-demand: the `red-team (nightly)` workflow's *Run workflow* button.

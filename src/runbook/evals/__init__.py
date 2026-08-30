@@ -22,6 +22,7 @@ Entry point: `runbook eval` (see `cli.py`). Needs `ANTHROPIC_API_KEY` +
 from __future__ import annotations
 
 from .cases import CASES, EvalCase
+from .promote import render_case_stub
 from .report import CaseOutcome, EvalReport, bless_from_json, load_baseline, write_baseline
 from .runner import run_evals
 
@@ -32,6 +33,7 @@ __all__ = [
     "EvalReport",
     "bless_from_json",
     "load_baseline",
+    "render_case_stub",
     "run_evals",
     "write_baseline",
 ]

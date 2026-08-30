@@ -12,6 +12,7 @@ runbook approve <id> [--step N] [--by]   approve a run's pending state-changing 
 runbook reject <id> --note "why" [--by]  reject a run (whole run → rejected)
 runbook feature <id> [--unfeature]       mark a run as a curated dashboard exemplar
 runbook outcome <id> --root-cause "…"    record the confirmed root cause as incident memory
+runbook promote <id>                     render a golden EvalCase stub from a real run
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
 runbook eval [--scenario N] [--no-judge]  run the golden eval set through the real loop
 runbook redteam [--condition C] [-j N]    run the log-injection red-team harness
@@ -358,6 +359,35 @@ def _cmd_outcome(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_promote(args: argparse.Namespace) -> int:
+    """Render a golden `EvalCase` stub from a real incident run (ADR-0016). Prints
+    to stdout for the human to review + paste into `evals/cases.py` — labels are
+    hand-set ground truth, never auto-generated."""
+    from .core import get_outcome, get_run
+    from .evals import render_case_stub
+
+    r = get_run(args.id)
+    if r is None:
+        print(f"no run {args.id!r}")
+        return 1
+    if r.diagnosis is None:
+        print(f"run {args.id} has no diagnosis (triage short-circuited it) — nothing to promote")
+        return 1
+
+    outcome = get_outcome(args.id)
+    if outcome is None and not args.force:
+        print(
+            f"promote: run {args.id} has no recorded outcome. The eval's "
+            f"reference_root_cause must be human-confirmed, not the model's guess — "
+            f'run `runbook outcome {args.id} --root-cause "…"` first, or pass --force '
+            f"to promote with the model's guess (marked TODO)."
+        )
+        return 1
+
+    print(render_case_stub(r, outcome))
+    return 0
+
+
 def _cmd_eval(args: argparse.Namespace) -> int:
     """Run the golden eval set (`evals/cases.py`) through the real `diagnose()`
     path, score + judge each case, print a scorecard, compare to the baseline.
@@ -654,6 +684,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     outcome.add_argument("--by", help="who is recording this (default: $USER)")
     outcome.set_defaults(func=_cmd_outcome)
+
+    promote = sub.add_parser(
+        "promote", help="render a golden EvalCase stub from a real incident run"
+    )
+    promote.add_argument("id", help="run id")
+    promote.add_argument(
+        "--force", action="store_true", help="promote even without a recorded outcome"
+    )
+    promote.set_defaults(func=_cmd_promote)
 
     ev = sub.add_parser("eval", help="run the golden eval set through the real loop")
     ev.add_argument("--scenario", action="append", help="limit to a sim scenario (repeatable)")

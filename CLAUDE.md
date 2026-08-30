@@ -30,10 +30,22 @@ embedding computed once for lookup + retrieval; `core/cost.py` `$/incident` from
 the free tier); persist-at-start (`record_run_start` stub + `mark_run_failed`, `record_run`
 upserts) — a crashed dashboard run is `failed`, not a 404. Prod-verified (`run_57dca911`).
 
-**Week 3 not started:** incident memory + red-team→eval flywheel · Langfuse tracing ·
-`/security` dashboard page. Nothing executes on approval — no state-changing tools.
-`retrieve()` + tools + `cache.py` are sync (blocking HTTP, only via `asyncio.to_thread` /
-CLI). Check before assuming a module exists.
+**Week 3 — incident memory + the flywheel** (ADRs 0015–0016, `migrations/0010`–`0011`):
+`core/memory.py` — after a terminal run a human records the confirmed root cause
+(`runbook outcome` / dashboard form → `incident_memory`, append-only, human-confirmed only =
+the anti-poisoning guard). `diagnose(use_memory=)` (CLI/dashboard yes, evals/red-team no) adds
+a 2nd retrieval leg over `incident_memory`, reusing the alert embedding — similar past
+incidents go in the prompt as **context, never a grounding source** (S3 unchanged);
+`memory_similarity_floor` 0.88 (calibrated — catches recurrences of the same incident, silent
+otherwise). `incident_runs.memories` (S6). `events.SCHEMA_VERSION → 4` (`memory.hit`). Flywheel:
+`runbook promote <run_id>` renders a golden `EvalCase` stub from a real run (seeded from the
+confirmed outcome, labels TODO — human reviews + commits, never auto-appended);
+`.github/workflows/redteam-nightly.yml` runs the hardened red-team daily (secrets-gated, not
+`ci.yml`). Prod-verified (`run_a59ce5c8` memory hit).
+
+**Week 3 not started:** Langfuse tracing · `/security` dashboard page. Nothing executes on
+approval — no state-changing tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync
+(blocking HTTP, only via `asyncio.to_thread` / CLI). Check before assuming a module exists.
 
 ## Golden rules
 

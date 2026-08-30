@@ -26,5 +26,9 @@ Things we've deliberately decided to do *later*, so they don't clog the current 
   corpus-jailed synthetic runbooks as hydration-eligible; or sign the synthetic corpus at
   ingest and check the signature here. Tracked from ADR-0012's residual-risk note.
 
-- **Red-team → eval flywheel** — a successful `runbook redteam` attack should be promotable
-  into a golden regression case (Week 3 flywheel item). Manual for now.
+- ~~**Red-team → eval flywheel**~~ — done (ADR-0016). Two mechanisms: `runbook promote
+  <run_id>` renders a golden `EvalCase` stub from a real incident run (seeded from the
+  human-confirmed `runbook outcome`, labels marked TODO — the human reviews + commits); and
+  `.github/workflows/redteam-nightly.yml` runs the full hardened red-team daily, so every
+  attack in `attacks.py` is a standing regression assertion. Red-team attacks stay a separate
+  suite (different scorers + bar), not folded into `cases.py`.
