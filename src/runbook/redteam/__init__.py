@@ -22,6 +22,7 @@ The measured before/after report: `docs/security/log-injection.md`.
 from __future__ import annotations
 
 from .attacks import ATTACKS, AttackCase
+from .baseline import bless_from_json, load_baseline
 from .detect import AttackOutcome, evaluate
 from .report import AttackReport, format_comparison
 from .runner import run_attacks
@@ -31,7 +32,9 @@ __all__ = [
     "AttackCase",
     "AttackOutcome",
     "AttackReport",
+    "bless_from_json",
     "evaluate",
     "format_comparison",
+    "load_baseline",
     "run_attacks",
 ]

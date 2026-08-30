@@ -1,9 +1,11 @@
 name: red-team
 
 # The log-injection red-team (ADR-0012) drives the REAL loop against crafted
-# poisoned inputs and fails on any hardened-condition attack success. Every case
-# in `redteam/attacks.py` is a standing regression assertion (ADR-0016): a hole
-# that is closed today stays closed.
+# poisoned inputs. `runbook redteam --gate` fails the job only on a REGRESSION vs
+# `redteam/baseline.json` (ADR-0016) — a `log`-surface success, a new succeeding
+# attack, or an accepted residual resolving less safely — not on the documented
+# residuals. Every case in `redteam/attacks.py` is a standing regression
+# assertion: a hole that is closed today stays closed.
 #
 # It is kept out of `ci.yml` (real model + retrieval calls, needs secrets —
 # ADR-0012 §4). Instead:
@@ -27,6 +29,8 @@ on:
       - "src/runbook/core/triage.py"
       - "src/runbook/rag/**"
       - "src/runbook/redteam/**"
+      - "src/runbook/embed.py"
+      - "src/runbook/jina.py"
       - ".github/workflows/redteam.yml"
   schedule:
     - cron: "17 6 * * 1" # ~06:17 UTC every Monday (offset off the hour — GitHub cron is congested on it)
@@ -56,11 +60,14 @@ jobs:
       - name: sync (frozen lockfile)
         run: uv sync --frozen
 
-      - name: red-team (hardened only)
-        # `runbook redteam` exits non-zero on any hardened success or any errored
-        # case — that is the gate. `--condition hardened` skips the baseline pass
-        # (it exists to quantify what the prompt defences buy, not to gate).
-        run: uv run runbook redteam --condition hardened -j 3 --json redteam-results/ci.json
+      - name: red-team regression gate
+        # `--gate` runs the hardened condition and exits non-zero ONLY on a
+        # regression vs redteam/baseline.json: a `log`-surface success, a new
+        # succeeding attack, or an accepted residual resolving less safely
+        # (ADR-0016). The documented poisoned-doc / alert-annotation residuals
+        # (SPEC "How we'll know it works") do not fail it; nor do 429-errored
+        # cases. Re-bless with `runbook redteam --bless <run.json>`.
+        run: uv run runbook redteam --gate -j 3 --json redteam-results/ci.json
 
       - name: upload report
         if: always()

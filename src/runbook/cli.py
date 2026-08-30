@@ -15,7 +15,7 @@ runbook outcome <id> --root-cause "…"    record the confirmed root cause as in
 runbook promote <id>                     render a golden EvalCase stub from a real run
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
 runbook eval [--scenario N] [--no-judge]  run the golden eval set through the real loop
-runbook redteam [--condition C] [-j N]    run the log-injection red-team harness
+runbook redteam [--condition C|--gate]    run the log-injection red-team harness
 """
 
 from __future__ import annotations
@@ -453,13 +453,33 @@ def _cmd_redteam(args: argparse.Namespace) -> int:
     attack-success-rate. `--condition both` (default) runs baseline (prompt
     defences off) and hardened (as shipped) and prints the before/after table.
 
+    `--gate` runs hardened and exits non-zero only on a *regression* vs
+    `redteam/baseline.json` — a `log`-surface success, a new succeeding attack, or
+    an accepted residual that resolved less safely (ADR-0016). `--bless <file>`
+    re-blesses the baseline from a prior `--json` run.
+
     Real model + retrieval calls — needs `OPENROUTER_API_KEY` + `DATABASE_URL`.
-    Not wired into CI (ADR-0012). Never persists a run."""
+    Scheduled via `.github/workflows/redteam.yml`, not `ci.yml` (ADR-0012). Never
+    persists a run."""
     import asyncio
     import json as _json
     from pathlib import Path
 
-    from .redteam import ATTACKS, format_comparison, run_attacks
+    from .redteam import ATTACKS, bless_from_json, format_comparison, load_baseline, run_attacks
+
+    if args.bless:
+        try:
+            baseline = bless_from_json(args.bless)
+        except (ValueError, OSError) as exc:
+            print(f"redteam: cannot bless — {exc}")
+            return 1
+        residuals = ", ".join(baseline["accepted_residuals"]) or "none"
+        print(f"redteam: baseline blessed from {args.bless} — commit redteam/baseline.json")
+        print(f"  accepted residuals: {residuals}")
+        return 0
+
+    if args.gate:
+        args.condition = "hardened"
 
     cases = list(ATTACKS)
     if args.case:
@@ -494,8 +514,29 @@ def _cmd_redteam(args: argparse.Namespace) -> int:
         out.write_text(_json.dumps({c: r.as_dict() for c, r in reports.items()}, indent=2) + "\n")
         print(f"\nredteam: wrote {args.json}")
 
+    hardened = reports.get("hardened")
+
+    if args.gate:
+        assert hardened is not None  # --gate forces --condition hardened
+        n = len(cases)
+        if n and hardened.n_errored / n > 0.4:
+            print(
+                f"\nredteam --gate: INCONCLUSIVE — {hardened.n_errored}/{n} cases errored "
+                f"(likely a 429 storm). Re-run; not treated as a regression."
+            )
+            return 1
+        fails = hardened.gate(load_baseline())
+        if fails:
+            print("\nredteam --gate: FAIL — regression vs redteam/baseline.json:")
+            for f in fails:
+                print(f"  ✗ {f}")
+            return 1
+        extra = f" ({hardened.n_errored} errored, ignored)" if hardened.n_errored else ""
+        print(f"\nredteam --gate: PASS — no new holes vs the blessed baseline{extra}")
+        return 0
+
     errored = any(r.n_errored for r in reports.values())
-    any_success = any(r.succeeded for r in reports.values() if r.condition == "hardened")
+    any_success = bool(hardened and hardened.succeeded)
     return 1 if (errored or any_success) else 0
 
 
@@ -728,6 +769,16 @@ def build_parser() -> argparse.ArgumentParser:
     rt.add_argument("--limit", type=int, help="run only the first N matching cases")
     rt.add_argument("-j", "--jobs", type=int, default=2, help="concurrent cases (default 2)")
     rt.add_argument("--json", help="also write the full per-case results to this path")
+    rt.add_argument(
+        "--gate",
+        action="store_true",
+        help="run hardened; exit non-zero only on a regression vs redteam/baseline.json",
+    )
+    rt.add_argument(
+        "--bless",
+        metavar="RESULTS.json",
+        help="re-bless redteam/baseline.json from a prior --json run, without re-running",
+    )
     rt.set_defaults(func=_cmd_redteam)
 
     sim = sub.add_parser("sim", help="inspect the fixture-backed sim by hand")

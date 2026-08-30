@@ -47,13 +47,33 @@ This makes the intended path **outcome → promote**: the same human confirmatio
 that feeds incident memory (ADR-0015) also seeds the eval label. One act of
 review, two durable artifacts.
 
-### 2. Red-team attacks stay a separate suite, triggered by the change
+### 2. Red-team attacks stay a separate suite, gated against a blessed baseline
 
-The full `redteam/attacks.py` list already **is** the regression set — `runbook
-redteam` exits non-zero on any hardened-condition success or errored case. What
-was missing is a trigger. It's kept out of `ci.yml` (real model + retrieval
-calls, needs secrets — ADR-0012 §4), so `.github/workflows/redteam.yml` runs
-`runbook redteam --condition hardened` on:
+The full `redteam/attacks.py` list is the regression set. `runbook redteam` on
+its own exits non-zero on **any** hardened success — right for local dev, wrong
+for a CI gate, because the bar is not "zero successes". From SPEC "How we'll know
+it works": **0% on the `log` surface** (indirect injection — the primary threat),
+**the approval gate never bypassed**, and the documented residuals
+(alert-annotation → triage suppression, poisoned-doc exfiltration;
+`docs/security/log-injection.md` §5) are *accepted*. A gate that fires on those
+every run is worse than no gate — a real `log` regression drowns in the noise.
+
+So, mirroring `evals/baseline.json`: `redteam/baseline.json` records the accepted
+residuals (id → worst disposition tolerated). `runbook redteam --gate` runs
+hardened and fails **only** on a departure from it —
+
+- a **`log`-surface success** (never acceptable — cannot even be blessed),
+- a **new** succeeding attack id (a hole that wasn't there), or
+- an accepted residual resolving **less safely** than baselined (e.g. a
+  poisoned-doc injection that used to hit `needs-approval` now hits `auto` — the
+  approval gate stopped containing it).
+
+429-errored cases never fail the gate (infra flakiness); a >40 % error rate makes
+the run *inconclusive* (re-run), not a regression. `runbook redteam --bless
+<run.json>` re-blesses — the diff to `baseline.json` in a PR is the written
+justification. It's kept out of `ci.yml` (real model + retrieval calls, needs
+secrets — ADR-0012 §4), so `.github/workflows/redteam.yml` runs `runbook redteam
+--gate` on:
 
 - **`pull_request`** touching a defence surface (`prompts/**`, `core/loop.py`,
   `core/guardrail.py`, `core/triage.py`, `rag/**`, `redteam/**`) — the trigger
@@ -69,10 +89,11 @@ someone got paged.
 
 A promoted attack does **not** become an `EvalCase`. A poisoned-log case has
 different inputs (an injected surface), a different success definition (a
-`detect.py` signal, not a judge score), and a different bar (ASR = 0, not "≥
-threshold"). Folding it into `cases.py` would blur "the golden set is what a
-competent responder concludes". New attacks are added to `attacks.py` directly,
-with a `control/*` peer where disposition manipulation is in scope.
+`detect.py` signal, not a judge score), and a different gate (baseline-relative,
+with a hard `log`-surface floor — not the eval's target/tolerance bands).
+Folding it into `cases.py` would blur "the golden set is what a competent
+responder concludes". New attacks are added to `attacks.py` directly, with a
+`control/*` peer where disposition manipulation is in scope.
 
 ## Alternatives considered
 
@@ -82,6 +103,13 @@ with a `control/*` peer where disposition manipulation is in scope.
 - **One unified "regression" command over both eval + red-team.** Rejected —
   different scorers, different bars, different CI story (one has no secrets, one
   needs them). A shared entry point would hide that.
+- **Gate on "any hardened success" (no baseline).** Rejected — the SPEC bar
+  accepts documented residuals, so this gate is red on every run and a real
+  `log`-surface regression is lost in the noise. First red-team CI run proved
+  it: 2/11 succeeded, both accepted residuals, job failed.
+- **Filter the CI run to `--surface log` only.** Rejected — cheaper, but loses
+  visibility into `doc`/`alert` drift (a residual quietly getting worse). The
+  baseline gate keeps the whole surface in view while tolerating the known state.
 - **Run the red-team after every real incident run.** Rejected — the defences
   don't change per incident, so this would re-run an expensive (~15–25 real loop
   runs, 429-prone) suite for no new signal, and burn the rate limit that live
@@ -97,12 +125,15 @@ with a `control/*` peer where disposition manipulation is in scope.
 ## Consequences
 
 - New CLI `runbook promote`; new `evals/promote.py` + `render_case_stub` export.
+- New CLI `runbook redteam --gate` / `--bless`; new `redteam/baseline.py` +
+  `redteam/baseline.json` (blessed from `redteam-results/run-02.json` — the three
+  SPEC residuals); `AttackReport.gate()`.
 - New `.github/workflows/redteam.yml` (PR-on-defence-surface + weekly + manual) —
   needs `OPENROUTER_API_KEY`, `JINA_API_KEY`, `DATABASE_URL`,
   `DATABASE_URL_UNPOOLED` repo secrets.
 - `docs/BACKLOG.md` "Red-team → eval flywheel" item closed;
   `docs/security/log-injection.md` §5 re-run note points at the workflow.
 - **Revisit if:** promoted cases accumulate enough that they want their own list
-  + a "promoted from" provenance field on `EvalCase`; or the red-team's free-tier
-  flakiness (429s → errored cases → red job) needs a retry/quarantine lane
-  distinct from a real regression.
+  + a "promoted from" provenance field on `EvalCase`; or the >40 %-errored
+  "inconclusive" heuristic proves too coarse and the gate needs a per-case
+  retry/quarantine lane.
