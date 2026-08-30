@@ -23,16 +23,26 @@ independent action classification + tighten-only 2nd pass → `disposition`), `c
 hard S1–S3 + soft metrics + reference LLM-judge, real `diagnose()` never persisted, `baseline.json`
 regression gate; `runbook eval`). Deterministic CI (`.github/workflows/ci.yml`).
 
+Dashboard (ADR-0010): `web_api.py` exposes the loop over HTTP + SSE — `POST /api/incidents`
+(fire-and-forget `asyncio` task, no job queue), `GET /api/incidents(+/{id})`, SSE
+`/{id}/events` (replay-then-live), `POST /{id}/approve|reject`, `GET /api/scenarios`. Progress
+via `diagnose(on_event=...)` → `core/events.py` (versioned; `None` for CLI/eval — baseline
+unaffected). In-memory `_RUNS` registry is the disposable live layer; Postgres is the record.
+`web/` = Vite + React + Tailwind + react-router, built to `web/dist/`, served by `app.py` as
+the SPA (mounted after the API) when present. Dev: `uvicorn` + `cd web && npm run dev` (proxies
+`/api`). Dockerfile has a `node:20` build stage.
+
 LLM provider = **OpenRouter free models** (ADR-0009). `llm.py` on the `openai` SDK: neutral
 `Turn`/`Usage`/`ToolRequest`, own 429/5xx retry, per-role model fallback chains
 (`extra_body.models`, capped at 3), `parse` via `create` + manual validation. Config chains
 (`config.py`): parse = `nvidia/nemotron-3-super-120b-a12b:free`, tool loop = `z-ai/glm-5.2:free`
 → MiniMax, judge = GLM → nemotron. Blessed baseline: 30/30, deterministic metrics 1.00, judge
-0.91, hard checks clear. `OPENROUTER_API_KEY` in `.env` + Render. **HEAD `77ca91c` not pushed.**
+0.91, hard checks clear. `OPENROUTER_API_KEY` in `.env` + Render.
 
-Not started: dashboard (`web/`, REST+SSE+React), incident memory, Langfuse tracing, redaction
-(S5). Nothing is executed on approval — no state-changing tools. `retrieve()` + tools are sync
-(via `asyncio.to_thread`). Check before assuming a module exists.
+Not started: incident memory, Langfuse tracing, redaction (S5). Nothing is executed on
+approval — no state-changing tools. The dashboard's post-resolution root-cause note is captured
+(`resolve_approvals(note=...)`) but not yet fed to a new eval case / incident memory. `retrieve()`
++ tools are sync (via `asyncio.to_thread`). Check before assuming a module exists.
 
 ## Golden rules
 
@@ -63,7 +73,8 @@ Not started: dashboard (`web/`, REST+SSE+React), incident memory, Langfuse traci
   does it cost" signal for the CLI phase.
 - **Docker** — single image; listens on `$PORT` (`8000` locally).
   Deploy: Render (Docker), `render.yaml` Blueprint, git-push-to-deploy on `main`.
-- Frontend: **Vite + React** in `web/`, built into `web/dist/`, served by FastAPI — Week 2.
+- Frontend: **Vite + React + Tailwind + react-router** in `web/`, built into `web/dist/`,
+  served by FastAPI as the SPA (ADR-0010). Live run progress over **SSE**.
 - Models: **OpenRouter** (OpenAI-compatible, SDK `openai` async), **free `:free` models** —
   ADR-0009. Per-role chains (`config.py`): triage / structured-parse workhorse =
   `nvidia/nemotron-3-super-120b-a12b:free` (reliably enforces `json_schema` on the free tier);
@@ -82,14 +93,15 @@ src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site), db
                    cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
                    rag/ (hybrid retrieve + rerank), sim/ (fixture env + scenarios/),
                    tools.py (read-only tools + schemas + allowlist),
-                   core/ (triage + loop + guardrail + store), prompts/ (versioned prompt files),
-                   evals/ (golden set + scorers + judge + runner + report + baseline.json)
+                   core/ (triage + loop + guardrail + store + events), prompts/ (versioned),
+                   evals/ (golden set + scorers + judge + runner + report + baseline.json),
+                   web_api.py (REST + SSE — the dashboard backend)
+web/               Vite + React + Tailwind SPA; `npm run build` → web/dist/ (served by app.py)
 tests/             pytest — deterministic by default (no model calls, no secrets);
                    *_integration.py skip themselves without a configured database_url
 .github/workflows/ ci.yml — ruff + deterministic pytest on every push (no secrets)
-Dockerfile         python:3.12-slim + uv, uvicorn on $PORT
+Dockerfile         node:20 build stage (web/dist) + python:3.12-slim + uv, uvicorn on $PORT
 render.yaml        Render Blueprint (deploy config)
-(coming: web/)
 ```
 
 ## Commands
@@ -110,6 +122,9 @@ uv run runbook sim <action> <scenario> [...]            inspect the sim (list|sh
 uv run runbook eval [--scenario N] [--no-judge] [-j N]  golden eval set → real loop → scorecard vs baseline
 uv run runbook eval --update-baseline                   on a clean run, re-bless evals/baseline.json
 uv run runbook eval --bless eval-results/<run>.json      bless a prior --json run without re-running
+
+cd web && npm install && npm run dev                    dashboard dev server (:5173, proxies /api → :8000)
+cd web && npm run build                                 build the SPA into web/dist/ (app.py then serves it)
 ```
 
 ## Conventions
