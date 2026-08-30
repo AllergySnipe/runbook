@@ -46,18 +46,27 @@ accelerator, never a source of truth.
 **Why the gate is deliberately tight.** A false negative just repeats work; a
 false positive serves the wrong runbook and triage lane for a *genuinely
 different* incident — the on-call equivalent of a misfiled ticket. So the
-threshold is set to accept many false negatives to push false positives to zero.
+threshold is set to accept false negatives to push false positives to zero.
 
-Calibration (`scripts/calibrate_cache_threshold.py`, run over the 26 golden
-incident alerts — canonical + 3 paraphrases each):
+**What the cache targets:** a *re-fire* of one alert — same incident, text
+drifting only in volatile fields (current value, timestamp, a "(retry)" suffix) —
+**not** a reworded description. Calibration
+(`scripts/calibrate_cache_threshold.py`, `jina-embeddings-v5-text-small`,
+`retrieval.query` task):
 
 | alert pair | n | min | mean | max |
 |---|---|---|---|---|
-| same scenario (paraphrases) | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| cross scenario (different failure modes) | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| **near-duplicate** — canonical alert vs. small perturbations of itself | 23 | **0.960** | 0.981 | 0.994 |
+| paraphrase — golden set's deliberately-diverse rewordings of one incident | 37 | 0.333 | 0.571 | **0.776** |
+| cross-scenario — different failure modes | 288 | 0.217 | 0.440 | 0.751 |
 
-At threshold 0.97: _TBD_ false negatives, _TBD_ false positives. _(Fill in from a
-real run — the script prints exactly these rows.)_
+At **0.97**: 21/23 near-duplicates caught (the 2 misses swap `p99`→`p95` /
+`above`→`over` — arguably a different alert), **0/37 paraphrases**, **0/325
+negative pairs**. The 0.18 gap between near-duplicate min (0.96) and paraphrase
+max (0.78) is the safety margin. 0.95 would raise re-fire recall with margin
+still intact if that ever matters; 0.97 is the zero-false-positive choice.
+Diverse rewordings are correctly *not* cached — that's a job for triage +
+retrieval, which are cheap enough to re-run.
 
 **Opt-in.** `diagnose(use_cache=False)` by default; the CLI and the dashboard
 pass `True`, the eval suite and the red-team harness never do (each case must
