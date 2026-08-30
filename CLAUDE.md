@@ -10,31 +10,24 @@ before any state-changing action.
 
 ## Status
 
-**Weeks 0–2 done + deployed** (`main` HEAD, https://runbook-cgkn.onrender.com): Neon +
-`migrations/0001`–`0006`, `ingest`/`embed` (ADR-0002), `rag/` hybrid retrieve+rerank
-(ADR-0003), `sim/` + `tools.py` (ADR-0004), `core/` loop → triage → guardrail → approval gate
-(ADRs 0005–0007), golden eval set (ADR-0008, 30/30 blessed), dashboard REST+SSE + React SPA
-(ADR-0010), OpenRouter LLM layer (ADR-0009). Deterministic CI.
+**Weeks 0–2 done + deployed** (`main` HEAD, https://runbook-cgkn.onrender.com, Render **free**
+plan): Neon + `migrations/0001`–`0007`, `ingest`/`embed`, `rag/` hybrid retrieve+rerank,
+`sim/` + `tools.py`, `core/` loop → triage → guardrail → approval gate, golden eval set
+(30/30 blessed), dashboard REST+SSE + React SPA, OpenRouter LLM layer (ADRs 0002–0010).
+Deterministic CI.
 
-**Week 3: redaction (S5) done** — `redact.py` deterministic scrubber, two enforcement points
-(ADR-0011). **Week 3: log-injection red-team done** — `src/runbook/redteam/` + `runbook
-redteam` CLI + ADR-0012 + `docs/security/log-injection.md`. First measured result: indirect
-`log`-surface injection held 0/5 (prompt fences on *or* off); approval gate never bypassed; 3
-residual findings (alert→triage suppression, poisoned-doc exfil, a gated injected step). Not
-in CI; `tests/test_redteam.py` covers the deterministic parts.
+**Week 3 done:** redaction/S5 (`redact.py`, ADR-0011) · log-injection red-team
+(`src/runbook/redteam/` + `runbook redteam` CLI, ADR-0012; not in CI) · **hosted retrieval
+models** — embeddings + reranking on **Jina** (`src/runbook/jina.py`, one call site; ADR-0013
+supersedes the local-model parts of 0002/0003), `jina-embeddings-v5-text-small` (1024-dim) +
+`jina-reranker-v2-base-multilingual`. `migrations/0007` → `vector(1024)`, corpus re-embedded.
+Container ~476 MB → ~90 MB; needs `JINA_API_KEY`. **Verified on prod** (`run_49b3e90b`,
+retrieval + loop clean). `test_jina.py` mocks it; live retrieval tests `skipif` no real key.
 
-**Week 3: hosted retrieval models done** — embeddings + reranking moved off the box to
-**Jina** (`src/runbook/jina.py`, one call site; ADR-0013, superseding the local-model parts
-of 0002/0003). `jina-embeddings-v5-text-small` (1024-dim) + `jina-reranker-v2-base-multilingual`.
-`migrations/0007` widened `documents.embedding` to `vector(1024)`; corpus re-embedded. Container
-dropped ~476 MB → ~90 MB, so Render is back on the **free** plan (+ `keepwarm.yml` cron).
-Needs `JINA_API_KEY`. Retrieval no longer runs offline; `test_jina.py` mocks it, the live
-retrieval tests `skipif` without a real key.
-
-**Not started:** incident memory + red-team→eval flywheel, Langfuse tracing, `/security`
-dashboard page, poisoned-doc hydration hardening (`docs/BACKLOG.md`). Nothing executes on
-approval — no state-changing tools. `retrieve()` + tools are sync. Check before assuming a
-module exists.
+**Week 3 not started:** model routing + semantic cache + `$/incident` (slice 3) · incident
+memory + red-team→eval flywheel · Langfuse tracing · `/security` dashboard page. Nothing
+executes on approval — no state-changing tools. `retrieve()` + tools are sync (blocking HTTP
+now runs inside, but only via `asyncio.to_thread` / the CLI). Check before assuming a module exists.
 
 ## Golden rules
 
