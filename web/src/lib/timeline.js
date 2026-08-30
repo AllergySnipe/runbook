@@ -3,6 +3,12 @@
 // replays its whole buffer on every (re)connect, so this must be idempotent.
 
 const ROWS = {
+  "cache.hit": (d) => ({
+    phase: "cache",
+    detail: `hit · ${(d.similarity ?? 0).toFixed(2)} sim · ${d.age_s ?? 0}s old — triage + retrieval reused`,
+    tone: "muted",
+    ok: true,
+  }),
   "triage.start": () => ({ phase: "triage", detail: "classifying the alert", pending: true }),
   "triage.done": (d) => ({
     phase: "triage",

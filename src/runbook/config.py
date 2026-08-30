@@ -51,6 +51,16 @@ class Settings(BaseSettings):
     retrieve_candidates: int = 30  # per-list depth pulled before fusion / rerank
     rerank_enabled: bool = True
 
+    # Semantic cache (ADR-0014). A proceeding alert within `similarity_threshold`
+    # cosine AND `ttl_s` of a prior one reuses its triage verdict + retrieved
+    # runbook set (never its diagnosis). The threshold is deliberately tight — a
+    # false hit serves the wrong runbook for a real, distinct incident. See the
+    # calibration table in ADR-0014. `cache_enabled` is the prod kill-switch;
+    # `diagnose(use_cache=...)` is off by default so evals/red-team never cache.
+    cache_enabled: bool = True
+    cache_similarity_threshold: float = 0.97
+    cache_ttl_s: int = 3600
+
     # Model routing (ADR-0009 — free OpenRouter models). Free `:free` endpoints
     # each sit on ONE shared provider pool and 429 often, so every role is a
     # *chain*: OpenRouter walks it on a 429/5xx (`extra_body.models`).

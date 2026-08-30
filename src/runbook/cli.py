@@ -85,12 +85,14 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     sc = load_scenario(args.scenario)
     alert = args.alert or f"{sc.alert or 'incident'} — {sc.summary.strip()}"
 
-    result = asyncio.run(diagnose(alert, args.scenario, k=args.k))
+    result = asyncio.run(diagnose(alert, args.scenario, k=args.k, use_cache=True))
 
     print(f"\nalert:    {alert}")
     print(f"scenario: {result.scenario}")
     t = result.triage
     print(f"triage:   {t.category}  ({t.confidence})  — {t.rationale}")
+    if result.cache_hit:
+        print("cache:    hit — reused triage + retrieval from a recent near-duplicate alert")
 
     if result.short_circuited:
         print("\n→ triage short-circuited this alert — the diagnosis loop did not run")

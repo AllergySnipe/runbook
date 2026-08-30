@@ -63,8 +63,9 @@ export function openEventStream(id, onEvent) {
   return () => es.close();
 }
 
-// Must match core/events.py (SCHEMA_VERSION 2).
+// Must match core/events.py (SCHEMA_VERSION 3).
 export const EVENT_TYPES = [
+  "cache.hit",
   "triage.start",
   "triage.done",
   "short_circuit",

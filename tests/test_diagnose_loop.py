@@ -95,6 +95,9 @@ def _run(
     triage=None,
     second_pass_concerns=None,
     on_event=None,
+    use_cache=False,
+    cache_hit=None,
+    store_sink=None,
 ):
     """Wire fakes and run diagnose().
 
@@ -102,8 +105,19 @@ def _run(
     (`_text_block` / `_tool_block`) decide the `llm.Turn`. `diagnosis` is a
     Diagnosis, or a list (one per synthesis call), or `None` to make synthesis
     raise `LLMParseError` (a refusal / truncation).
+
+    The semantic cache is always stubbed: `embed_query` returns a fixed vector,
+    `alert_cache.lookup` returns `cache_hit` (a `CacheHit` or `None`), and
+    `alert_cache.store` appends its kwargs to `store_sink` if given.
     """
     monkeypatch.setattr(diag, "retrieve", lambda *a, **k: [_chunk()])
+    monkeypatch.setattr(diag, "embed_query", lambda *a, **k: [0.05] * 8)
+    monkeypatch.setattr(diag.alert_cache, "lookup", lambda *a, **k: cache_hit)
+    monkeypatch.setattr(
+        diag.alert_cache,
+        "store",
+        lambda *a, **k: store_sink.append(k) if store_sink is not None else None,
+    )
 
     calls = {"n": 0}
     syn_calls = {"n": 0}
@@ -151,6 +165,7 @@ def _run(
             "db-connection-pool-exhaustion",
             max_iters=max_iters,
             on_event=on_event,
+            use_cache=use_cache,
         )
     )
 
@@ -392,6 +407,100 @@ def test_synthesis_none_on_the_grounding_retry_also_escalates(monkeypatch):
     assert result.diagnosis is None
     assert result.disposition == "escalate"
     assert not result.short_circuited
+
+
+def test_cache_disabled_by_default_makes_no_cache_calls(monkeypatch):
+    """`use_cache` defaults False — the eval suite and red-team harness rely on
+    this to always exercise the full triage + retrieval path."""
+    seen = {"embed": 0, "lookup": 0}
+    monkeypatch.setattr(
+        diag, "embed_query", lambda *a, **k: seen.__setitem__("embed", seen["embed"] + 1) or [0.0]
+    )
+    monkeypatch.setattr(
+        diag.alert_cache, "lookup", lambda *a, **k: seen.__setitem__("lookup", seen["lookup"] + 1)
+    )
+
+    turns = [("end_turn", [_text_block("checked")])]
+    result = _run(monkeypatch, turns=turns, diagnosis=_readonly_diagnosis())  # use_cache=False
+
+    assert not result.cache_hit
+    assert seen == {"embed": 0, "lookup": 0}
+
+
+def test_cache_hit_skips_triage_and_retrieval(monkeypatch):
+    from runbook.core.cache import CacheHit
+
+    hit = CacheHit(
+        entry_id=7,
+        similarity=0.991,
+        age_s=120.0,
+        triage=_triage("known-runbook"),
+        retrieved=[_chunk()],
+    )
+    triage_calls = {"n": 0}
+
+    async def boom_triage(*a, **k):  # must not be called
+        triage_calls["n"] += 1
+        raise AssertionError("triage ran on a cache hit")
+
+    monkeypatch.setattr(diag, "triage", boom_triage)
+    monkeypatch.setattr(
+        diag,
+        "retrieve",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("retrieve ran on a cache hit")),
+    )
+
+    events: list = []
+    turns = [("end_turn", [_text_block("done")])]
+    result = _run(
+        monkeypatch,
+        turns=turns,
+        diagnosis=_diagnosis("Roll back the implicated deploy"),
+        use_cache=True,
+        cache_hit=hit,
+        on_event=events.append,
+    )
+
+    assert result.cache_hit
+    assert triage_calls["n"] == 0
+    assert result.triage.category == "known-runbook"
+    assert result.diagnosis is not None  # the loop still ran fresh
+    assert result.disposition == "needs-approval"
+    cache_events = [e for e in events if e["type"] == "cache.hit"]
+    assert len(cache_events) == 1
+    assert cache_events[0]["data"]["similarity"] == 0.991
+
+
+def test_cache_miss_stores_the_prefix(monkeypatch):
+    sink: list = []
+    turns = [("end_turn", [_text_block("done")])]
+    result = _run(
+        monkeypatch,
+        turns=turns,
+        diagnosis=_diagnosis("Roll back the implicated deploy"),
+        use_cache=True,
+        cache_hit=None,
+        store_sink=sink,
+    )
+
+    assert not result.cache_hit
+    assert len(sink) == 1
+    assert sink[0]["triage"].category == "known-runbook"
+    assert [c.title for c in sink[0]["retrieved"]] == [_chunk().title]
+
+
+def test_cache_not_stored_on_a_short_circuit(monkeypatch):
+    sink: list = []
+    turns = [("end_turn", [_text_block("nope")])]
+    _run(
+        monkeypatch,
+        turns=turns,
+        diagnosis=_diagnosis("Roll back the implicated deploy"),
+        triage=_triage("noise-or-flapping"),
+        use_cache=True,
+        store_sink=sink,
+    )
+    assert sink == []
 
 
 def test_check_grounding_normalises_whitespace_and_case():

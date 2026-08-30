@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-SCHEMA_VERSION = 2  # +redaction (S5)
+SCHEMA_VERSION = 3  # +cache.hit (semantic cache, ADR-0014)
 
 
 class Event(TypedDict):
@@ -28,6 +28,7 @@ class Event(TypedDict):
 # --- event types -------------------------------------------------------------
 # Kept flat and coarse: one per user-visible milestone, not one per function call.
 
+CACHE_HIT = "cache.hit"  # semantic cache: a near-duplicate alert — triage + retrieval reused
 TRIAGE_START = "triage.start"
 TRIAGE_DONE = "triage.done"
 SHORT_CIRCUIT = "short_circuit"  # triage routed this out of the loop

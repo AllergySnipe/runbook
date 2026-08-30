@@ -64,8 +64,13 @@ def rrf_fuse(rankings: list[list[int]], k_rrf: int = RRF_K) -> list[tuple[int, f
     return sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
-def _vector_search(conn: psycopg.Connection, query: str, limit: int) -> list[tuple[int, float]]:
-    qvec = to_pgvector(embed_query(query))
+def _vector_search(
+    conn: psycopg.Connection,
+    query: str,
+    limit: int,
+    query_vec: list[float] | None = None,
+) -> list[tuple[int, float]]:
+    qvec = to_pgvector(query_vec if query_vec is not None else embed_query(query))
     rows = conn.execute(
         """
         select id, embedding <=> %s::vector as distance
@@ -126,12 +131,18 @@ def retrieve(
     *,
     mode: Mode = "hybrid",
     rerank: bool | None = None,
+    query_vec: list[float] | None = None,
 ) -> list[RetrievedChunk]:
     """Return the top `k` chunks for `query`.
 
     `rerank=None` follows `settings.rerank_enabled`; pass a bool to force it.
     Rerank is skipped for single-leg modes only if explicitly disabled — it still
     helps there.
+
+    `query_vec` is a pre-computed embedding of `query` (`retrieval.query` task).
+    Pass it to skip the vector-leg's own embedding call — `core/loop.py` computes
+    the alert embedding once for the semantic-cache lookup and reuses it here
+    (ADR-0014).
     """
     settings = get_settings()
     depth = settings.retrieve_candidates
@@ -141,7 +152,7 @@ def retrieve(
         legs: list[list[int]] = []
         raw: dict[str, dict[int, float]] = {}
         if mode in ("hybrid", "vector"):
-            vec = _vector_search(conn, query, depth)
+            vec = _vector_search(conn, query, depth, query_vec)
             raw["vector"] = dict(vec)
             legs.append([doc_id for doc_id, _ in vec])
         if mode in ("hybrid", "text"):

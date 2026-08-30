@@ -43,15 +43,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .. import llm
 from ..config import get_settings
+from ..embed import embed_query
 from ..prompts import load as load_prompt
 from ..rag import RetrievedChunk, retrieve
 from ..redact import RedactionSpan, redact
 from ..sim import load_scenario
 from ..tools import SCHEMAS, run_tool
+from . import cache as alert_cache
 from . import events as ev
 from .events import Event
 from .guardrail import GuardrailReport, apply_second_pass, classify_steps, second_pass
-from .triage import TriageResult, triage
+from .triage import TriageResult, normalise_alert, triage
 
 MAX_ITERS = 8
 
@@ -110,6 +112,7 @@ class DiagnoseResult:
     usage: dict[str, int]
     elapsed_s: float
     redaction_count: int = 0  # secrets/PII scrubbed from tool output this run (S5)
+    cache_hit: bool = False  # semantic cache reused the triage + retrieval prefix (ADR-0014)
 
     @property
     def short_circuited(self) -> bool:
@@ -231,6 +234,7 @@ async def diagnose(
     k: int = 4,
     max_iters: int = MAX_ITERS,
     on_event: Callable[[Event], None] | None = None,
+    use_cache: bool = False,
 ) -> DiagnoseResult:
     """Run the loop for one alert against one sim scenario.
 
@@ -238,6 +242,12 @@ async def diagnose(
     `core/events.py`) — the dashboard uses it to stream a live timeline. It is
     pure narration: the return value is unaffected, and `on_event=None` (the CLI
     and the eval runner) is a behaviourless no-op.
+
+    `use_cache` opts into the semantic cache (ADR-0014): a near-duplicate of a
+    recent proceeding alert reuses its triage verdict + retrieved runbook set,
+    skipping one triage model call, the rerank call, and both searches. Off by
+    default so the eval suite and the red-team harness always exercise the full
+    path; the CLI and the dashboard pass `use_cache=True`.
     """
     started = time.monotonic()
     settings = get_settings()
@@ -249,46 +259,95 @@ async def diagnose(
 
     load_scenario(scenario_name)  # fail early on a bad scenario name
 
-    emit(ev.event(ev.TRIAGE_START))
-    tri = await triage(alert)
-    emit(
-        ev.event(
-            ev.TRIAGE_DONE,
-            category=tri.category,
-            confidence=tri.confidence,
-            proceed=tri.proceed,
-            low_prior=tri.low_prior,
-        )
-    )
-    if not tri.proceed:
-        emit(ev.event(ev.SHORT_CIRCUIT, category=tri.category))
-        # `noise-or-flapping` / `need-more-info` — don't spend a tool-loop.
-        return DiagnoseResult(
-            alert=alert,
-            scenario=scenario_name,
-            triage=tri,
-            diagnosis=None,
-            guardrail=None,
-            disposition=None,
-            retrieved=[],
-            tool_calls=[],
-            iterations=0,
-            hit_max_iters=False,
-            grounding_issues=[],
-            usage={"input_tokens": 0, "output_tokens": 0},
-            elapsed_s=round(time.monotonic() - started, 1),
-        )
+    # --- semantic cache: the alert embedding, computed once, is reused for both
+    # the cache lookup and (on a miss) the retrieval vector leg ----------------
+    cache_on = use_cache and settings.cache_enabled
+    alert_norm = normalise_alert(alert)
+    alert_vec: list[float] | None = None
+    cached: alert_cache.CacheHit | None = None
+    if cache_on:
+        alert_vec = await asyncio.to_thread(embed_query, alert)
+        cached = await asyncio.to_thread(alert_cache.lookup, alert_vec)
 
-    emit(ev.event(ev.RETRIEVE_START))
-    retrieved = await asyncio.to_thread(retrieve, alert, k)
-    if not retrieved:
-        raise RuntimeError("retrieval returned nothing for this alert")
-    emit(
-        ev.event(
-            ev.RETRIEVE_DONE,
-            docs=list(dict.fromkeys((c.path or c.source) for c in retrieved)),
+    if cached is not None:
+        emit(
+            ev.event(
+                ev.CACHE_HIT,
+                similarity=round(cached.similarity, 4),
+                age_s=round(cached.age_s),
+                category=cached.triage.category,
+            )
         )
-    )
+        tri = cached.triage
+        retrieved = cached.retrieved
+        emit(
+            ev.event(
+                ev.TRIAGE_DONE,
+                category=tri.category,
+                confidence=tri.confidence,
+                proceed=tri.proceed,
+                low_prior=tri.low_prior,
+            )
+        )
+        emit(
+            ev.event(
+                ev.RETRIEVE_DONE,
+                docs=list(dict.fromkeys((c.path or c.source) for c in retrieved)),
+            )
+        )
+    else:
+        emit(ev.event(ev.TRIAGE_START))
+        tri = await triage(alert)
+        emit(
+            ev.event(
+                ev.TRIAGE_DONE,
+                category=tri.category,
+                confidence=tri.confidence,
+                proceed=tri.proceed,
+                low_prior=tri.low_prior,
+            )
+        )
+        if not tri.proceed:
+            emit(ev.event(ev.SHORT_CIRCUIT, category=tri.category))
+            # `noise-or-flapping` / `need-more-info` — don't spend a tool-loop.
+            # Not cached: triage is already cheap and must re-judge every flap.
+            return DiagnoseResult(
+                alert=alert,
+                scenario=scenario_name,
+                triage=tri,
+                diagnosis=None,
+                guardrail=None,
+                disposition=None,
+                retrieved=[],
+                tool_calls=[],
+                iterations=0,
+                hit_max_iters=False,
+                grounding_issues=[],
+                usage={"input_tokens": 0, "output_tokens": 0},
+                elapsed_s=round(time.monotonic() - started, 1),
+            )
+
+        emit(ev.event(ev.RETRIEVE_START))
+        retrieved = await asyncio.to_thread(retrieve, alert, k, query_vec=alert_vec)
+        if not retrieved:
+            raise RuntimeError("retrieval returned nothing for this alert")
+        emit(
+            ev.event(
+                ev.RETRIEVE_DONE,
+                docs=list(dict.fromkeys((c.path or c.source) for c in retrieved)),
+            )
+        )
+        if cache_on and alert_vec is not None:
+            # Record the prefix for future near-duplicates. Best-effort — a
+            # failed write is logged, never raised (see cache.store).
+            await asyncio.to_thread(
+                alert_cache.store,
+                alert_norm,
+                alert_vec,
+                triage=tri,
+                retrieved=retrieved,
+                run_id=None,
+            )
 
     runbook_text, runbook_source = _assemble_runbook(retrieved)
     # S5 ∩ S3 (ADR-0011): scrub the runbook before it goes in the prompt, then
@@ -385,6 +444,7 @@ async def diagnose(
             usage=usage,
             elapsed_s=round(time.monotonic() - started, 1),
             redaction_count=len(redactions),
+            cache_hit=cached is not None,
         )
 
     async def _synthesize(extra: str | None = None) -> Diagnosis | None:
@@ -511,4 +571,5 @@ async def diagnose(
         usage=usage,
         elapsed_s=round(time.monotonic() - started, 1),
         redaction_count=len(redactions),
+        cache_hit=cached is not None,
     )

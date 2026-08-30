@@ -85,7 +85,7 @@ def _evict() -> None:
 async def _run_incident(run: IncidentRun, k: int) -> None:
     """Fire-and-forget: run the loop, persist the result, narrate the outcome."""
     try:
-        result = await diagnose(run.alert, run.scenario, k=k, on_event=run.publish)
+        result = await diagnose(run.alert, run.scenario, k=k, on_event=run.publish, use_cache=True)
         rec = await asyncio.to_thread(record_run, result, run_id=run.id)
         run.publish(ev.event(ev.FINISHED, run_id=run.id, status=rec.status))
     except asyncio.CancelledError:
