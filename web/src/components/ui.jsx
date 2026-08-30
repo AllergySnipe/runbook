@@ -64,6 +64,7 @@ const STATUS_TOKENS = {
   rejected: ["--color-critical", "rejected"],
   escalated: ["--color-serious", "escalated"],
   "short-circuited": ["--color-ink-faint", "short-circuited"],
+  failed: ["--color-critical", "failed"],
 };
 
 export function StatusPill({ status }) {
