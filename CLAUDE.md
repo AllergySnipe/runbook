@@ -16,27 +16,24 @@ plan): Neon + `migrations/0001`–`0007`, `ingest`/`embed`, `rag/` hybrid retrie
 (30/30 blessed), dashboard REST+SSE + React SPA, OpenRouter LLM layer (ADRs 0002–0010).
 Deterministic CI.
 
-**Week 3 done:** redaction/S5 (`redact.py`, ADR-0011) · log-injection red-team
-(`src/runbook/redteam/` + `runbook redteam` CLI, ADR-0012; not in CI) · **hosted retrieval
-models** — embeddings + reranking on **Jina** (`src/runbook/jina.py`, one call site; ADR-0013
-supersedes the local-model parts of 0002/0003), `jina-embeddings-v5-text-small` (1024-dim) +
-`jina-reranker-v2-base-multilingual`. `migrations/0007` → `vector(1024)`, corpus re-embedded.
-Container ~476 MB → ~90 MB; needs `JINA_API_KEY`. **Verified on prod** (`run_49b3e90b`).
-· **semantic cache + `$/incident` + routing** (ADR-0014): `alert_cache` (`migrations/0008`,
-`vector(1024)`) — a near-duplicate proceeding alert within 0.97 cosine + 1 h TTL reuses the
-triage + retrieval prefix (never the diagnosis); `core/cache.py`, opt-in via
-`diagnose(use_cache=)` (CLI + dashboard yes, evals/red-team no). Alert embedding computed
-once, reused for the lookup + the retrieval vector leg. `llm.Usage.model` (served model, per
-the fallback chain) → `usage["by_model"]` → `core/cost.py` `$/incident` at paid list prices →
-`incident_runs.cost_usd` (`migrations/0009`) + `GET /api/stats` (p50/p95 latency, cache-hit
-rate). `_route_loop_model`: confident `known-runbook` → cheaper loop chain (payoff latent on
-the free tier). Persist-at-start fix: `record_run_start` stub + `mark_run_failed` — a crashed
-dashboard run is `failed`, not a 404. `record_run` is now an upsert.
+**Week 3 done + deployed:** redaction/S5 (`redact.py`, ADR-0011) · log-injection red-team
+(`redteam/` + `runbook redteam`, ADR-0012; not in CI) · hosted retrieval on **Jina**
+(`jina.py`, `jina-embeddings-v5-text-small` 1024-dim + `jina-reranker-v2`, ADR-0013,
+`migrations/0007`; container ~476→~90 MB; needs `JINA_API_KEY`) · **semantic cache +
+`$/incident` + routing** (ADR-0014, `migrations/0008`–`0009`): `core/cache.py` — a re-fired
+alert within 0.97 cosine + 1 h TTL reuses the triage + retrieval prefix (never the
+diagnosis), opt-in via `diagnose(use_cache=)` (CLI/dashboard yes, evals/red-team no), alert
+embedding computed once for lookup + retrieval; `core/cost.py` `$/incident` from
+`usage["by_model"]` (keyed on `llm.Usage.model`, the served model) at paid list prices, on
+`incident_runs.cost_usd` + `GET /api/stats` (p50/p95 latency, cache-hit rate);
+`_route_loop_model` sends confident `known-runbook` to a cheaper loop chain (payoff latent on
+the free tier); persist-at-start (`record_run_start` stub + `mark_run_failed`, `record_run`
+upserts) — a crashed dashboard run is `failed`, not a 404. Prod-verified (`run_57dca911`).
 
 **Week 3 not started:** incident memory + red-team→eval flywheel · Langfuse tracing ·
 `/security` dashboard page. Nothing executes on approval — no state-changing tools.
-`retrieve()` + tools + `cache.py` are sync (blocking HTTP runs inside, only via
-`asyncio.to_thread` / the CLI). Check before assuming a module exists.
+`retrieve()` + tools + `cache.py` are sync (blocking HTTP, only via `asyncio.to_thread` /
+CLI). Check before assuming a module exists.
 
 ## Golden rules
 
