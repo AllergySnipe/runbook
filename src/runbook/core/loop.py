@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -40,6 +41,8 @@ from ..prompts import load as load_prompt
 from ..rag import RetrievedChunk, retrieve
 from ..sim import load_scenario
 from ..tools import SCHEMAS, run_tool
+from . import events as ev
+from .events import Event
 from .guardrail import GuardrailReport, apply_second_pass, classify_steps, second_pass
 from .triage import TriageResult, triage
 
@@ -184,6 +187,13 @@ def _check_grounding(diagnosis: Diagnosis, runbook_text: str) -> list[GroundingI
     return issues
 
 
+def _emit_tool_calls(emit: Callable[[Event], None], sink: list[ToolCall], since: int) -> None:
+    """Narrate each tool call recorded since index `since`. Called from the main
+    coroutine (not the worker thread) so `emit` stays on the event loop."""
+    for tc in sink[since:]:
+        emit(ev.event(ev.TOOL_CALL, name=tc.name, input=tc.input, is_error=tc.is_error))
+
+
 def _tool_results_for(
     requests: list[llm.ToolRequest], scenario: str, sink: list[ToolCall]
 ) -> list[dict]:
@@ -204,18 +214,38 @@ async def diagnose(
     *,
     k: int = 4,
     max_iters: int = MAX_ITERS,
+    on_event: Callable[[Event], None] | None = None,
 ) -> DiagnoseResult:
-    """Run the loop for one alert against one sim scenario."""
+    """Run the loop for one alert against one sim scenario.
+
+    `on_event`, if given, is called synchronously at each milestone (see
+    `core/events.py`) — the dashboard uses it to stream a live timeline. It is
+    pure narration: the return value is unaffected, and `on_event=None` (the CLI
+    and the eval runner) is a behaviourless no-op.
+    """
     started = time.monotonic()
     settings = get_settings()
     model = settings.diagnosis_model
     loop_fallbacks = settings.loop_fallbacks
     structured_fallbacks = settings.structured_fallbacks
 
+    emit: Callable[[Event], None] = on_event or (lambda _e: None)
+
     load_scenario(scenario_name)  # fail early on a bad scenario name
 
+    emit(ev.event(ev.TRIAGE_START))
     tri = await triage(alert)
+    emit(
+        ev.event(
+            ev.TRIAGE_DONE,
+            category=tri.category,
+            confidence=tri.confidence,
+            proceed=tri.proceed,
+            low_prior=tri.low_prior,
+        )
+    )
     if not tri.proceed:
+        emit(ev.event(ev.SHORT_CIRCUIT, category=tri.category))
         # `noise-or-flapping` / `need-more-info` — don't spend a tool-loop.
         return DiagnoseResult(
             alert=alert,
@@ -233,9 +263,16 @@ async def diagnose(
             elapsed_s=round(time.monotonic() - started, 1),
         )
 
+    emit(ev.event(ev.RETRIEVE_START))
     retrieved = await asyncio.to_thread(retrieve, alert, k)
     if not retrieved:
         raise RuntimeError("retrieval returned nothing for this alert")
+    emit(
+        ev.event(
+            ev.RETRIEVE_DONE,
+            docs=list(dict.fromkeys((c.path or c.source) for c in retrieved)),
+        )
+    )
 
     runbook_text, runbook_source = _assemble_runbook(retrieved)
     system = load_prompt("diagnose", runbook_source=runbook_source, runbook_text=runbook_text)
@@ -274,15 +311,18 @@ async def diagnose(
         messages.append(turn.assistant_message)
 
         if turn.stop_reason == "tool_calls" and turn.tool_requests:
+            before = len(tool_calls)
             if iterations >= max_iters:
                 hit_max = True
                 # answer the pending tool calls so history stays valid, then stop
                 messages.extend(_tool_results_for(turn.tool_requests, scenario_name, tool_calls))
+                _emit_tool_calls(emit, tool_calls, before)
                 break
             results = await asyncio.to_thread(
                 _tool_results_for, turn.tool_requests, scenario_name, tool_calls
             )
             messages.extend(results)
+            _emit_tool_calls(emit, tool_calls, before)
             continue
 
         break  # stop / length / other — move to synthesis with what we have
@@ -296,6 +336,7 @@ async def diagnose(
         a truncation, an unparseable response). Don't crash mid-incident — hand
         the tool evidence to a human. `diagnosis is None` + `disposition ==
         'escalate'` distinguishes this from a triage short-circuit."""
+        emit(ev.event(ev.DISPOSITION, disposition="escalate"))
         return DiagnoseResult(
             alert=alert,
             scenario=scenario_name,
@@ -335,14 +376,24 @@ async def diagnose(
         return d
 
     # --- synthesis + grounding enforcement (S3) ---------------------------
+    emit(ev.event(ev.SYNTHESIS_START))
     diagnosis = await _synthesize()
     if diagnosis is None:
         return _synthesis_failed()
+    emit(
+        ev.event(
+            ev.SYNTHESIS_DONE,
+            confidence=diagnosis.confidence,
+            failure_mode=diagnosis.failure_mode,
+            n_steps=len(diagnosis.remediation_steps),
+        )
+    )
     grounding_issues = _check_grounding(diagnosis, runbook_text)
     regenerated = False
     dropped = 0
     if grounding_issues:
         regenerated = True
+        emit(ev.event(ev.GROUNDING_REGENERATED, issues=len(grounding_issues)))
         detail = "; ".join(f"step {g.step_index + 1} — {g.reason}" for g in grounding_issues)
         regen = await _synthesize(
             "Your remediation steps failed the grounding check: "
@@ -361,8 +412,10 @@ async def diagnose(
             dropped = len(diagnosis.remediation_steps) - len(kept)
             diagnosis.remediation_steps = kept
             grounding_issues = []
+            emit(ev.event(ev.GROUNDING_DROPPED, count=dropped))
 
     # --- guardrail: independent action classification + second pass ------
+    emit(ev.event(ev.GUARDRAIL_START))
     verdicts = classify_steps(diagnosis.remediation_steps, runbook_text)
     concerns = []
     second_pass_ran = False
@@ -384,6 +437,22 @@ async def diagnose(
         dropped_ungrounded=dropped,
         second_pass_ran=second_pass_ran,
     )
+    emit(
+        ev.event(
+            ev.GUARDRAIL_DONE,
+            verdicts=[
+                {
+                    "step_index": v.step_index,
+                    "classification": v.classification,
+                    "model_disagreed": v.model_disagreed,
+                }
+                for v in verdicts
+            ],
+            concerns=[
+                {"step_index": c.step_index, "kind": c.kind, "detail": c.detail} for c in concerns
+            ],
+        )
+    )
 
     if not diagnosis.remediation_steps:
         disposition: Disposition = "escalate"
@@ -391,6 +460,7 @@ async def diagnose(
         disposition = "needs-approval"
     else:
         disposition = "auto"
+    emit(ev.event(ev.DISPOSITION, disposition=disposition))
 
     return DiagnoseResult(
         alert=alert,

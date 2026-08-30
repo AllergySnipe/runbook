@@ -200,10 +200,13 @@ def _row_to_record(row: tuple, approvals: list[tuple]) -> RunRecord:
 # --- writes / reads --------------------------------------------------------
 
 
-def record_run(result: DiagnoseResult) -> RunRecord:
+def record_run(result: DiagnoseResult, *, run_id: str | None = None) -> RunRecord:
     """Persist one `diagnose()` run. For a `needs-approval` disposition, also
-    write a `pending_approvals` row per state-changing step."""
-    run_id = "run_" + secrets.token_hex(4)
+    write a `pending_approvals` row per state-changing step.
+
+    `run_id` lets a caller pre-allocate the id (the dashboard returns it to the
+    client before the loop finishes); the CLI omits it and one is generated."""
+    run_id = run_id or "run_" + secrets.token_hex(4)
     d = result.diagnosis
     g = result.guardrail
 
