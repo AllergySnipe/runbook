@@ -1,9 +1,210 @@
 @import "tailwindcss";
 
+/* ── Design tokens ─────────────────────────────────────────────────────────
+   One system, two registers that share it:
+   · editorial (/, /how-it-works, /decisions) — Fraunces display, generous, calm
+   · console   (/incidents, /evals)           — Plex Mono, dotted grid, dense
+   Same colour, same mono face; they differ in layout + display type + texture.
+   Dark-first; light overrides at the bottom.                                 */
+
+@theme {
+  --font-sans:
+    -apple-system, "SF Pro Text", "Segoe UI", Roboto, Inter, system-ui, sans-serif;
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* surfaces + ink — a warm, paper-toned dark */
+  --color-bg: #0c0b0a;
+  --color-surface: #15130f;
+  --color-surface-2: #1c1a15;
+  --color-border: #2b2823;
+  --color-border-strong: #3d392f;
+  --color-ink: #efe9df;
+  --color-ink-muted: #a49d8f;
+  --color-ink-faint: #6f6a5e;
+
+  /* one signal colour — used sparingly, mostly for live / interactive state */
+  --color-accent: #5aa7c2;
+  --color-accent-soft: #17303a;
+
+  /* reserved status colours — never reused as "series N" */
+  --color-ok: #6bbf7b;
+  --color-warn: #d9a441;
+  --color-serious: #e08a4a;
+  --color-critical: #e0685f;
+  --color-info: #5aa7c2;
+
+  --radius-card: 8px;
+}
+
 :root {
   color-scheme: dark;
 }
 
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --color-bg: #faf8f3;
+    --color-surface: #ffffff;
+    --color-surface-2: #f3f0e8;
+    --color-border: #e5e0d4;
+    --color-border-strong: #d3ccbb;
+    --color-ink: #1f1c17;
+    --color-ink-muted: #57534a;
+    --color-ink-faint: #837c6e;
+    --color-accent: #1f7d9c;
+    --color-accent-soft: #d6ecf2;
+    --color-ok: #2f8a44;
+    --color-warn: #9a6b16;
+    --color-serious: #b45a20;
+    --color-critical: #c0392f;
+    --color-info: #1f7d9c;
+  }
+}
+
+* {
+  border-color: var(--color-border);
+}
+
 body {
-  @apply bg-zinc-950 text-zinc-200 antialiased;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── editorial register ──────────────────────────────────────────────────── */
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.015em;
+}
+
+.prose-col {
+  max-width: 42rem;
+}
+.prose-col p {
+  color: var(--color-ink-muted);
+  line-height: 1.75;
+  margin-bottom: 1rem;
+}
+.prose-col h2 {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  color: var(--color-ink);
+  font-size: 1.6rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  margin: 2.75rem 0 0.75rem;
+}
+.prose-col h3 {
+  color: var(--color-ink);
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 1.75rem 0 0.5rem;
+}
+.prose-col strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.prose-col em {
+  color: var(--color-ink);
+}
+.prose-col code {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.prose-col a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* figure caption for editorial diagrams */
+.figcaption {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--color-ink-faint);
+  text-transform: uppercase;
+}
+
+/* ── console register ────────────────────────────────────────────────────── */
+.console-grid {
+  background-image: radial-gradient(circle, var(--color-border) 0.7px, transparent 0.7px);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+}
+
+/* a bordered "terminal" panel with a header bar */
+.panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+.panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+/* status LED */
+.led {
+  position: relative;
+  display: inline-block;
+  height: 7px;
+  width: 7px;
+  border-radius: 9999px;
+  background: currentColor;
+  box-shadow: 0 0 0 2px color-mix(in oklab, currentColor 22%, transparent);
+}
+
+/* the inline-glossary marker */
+.term {
+  border-bottom: 1px dotted var(--color-ink-faint);
+  cursor: help;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+.dot-pending {
+  animation: pulse-dot 1.3s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.cursor-blink::after {
+  content: "▊";
+  margin-left: 2px;
+  animation: blink 1s step-end infinite;
+  color: var(--color-accent);
 }

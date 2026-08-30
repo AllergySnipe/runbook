@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { decide } from "../api.js";
+import { Term } from "./ui.jsx";
 
-// SPEC step 6 + 7: a human approves or rejects the state-changing steps, and can
-// record the actual root cause on the way through. Whole-run decisions here;
-// per-step is a CLI-only nicety for now.
+// SPEC steps 6 + 7: a human approves or rejects the state-changing steps and
+// records the actual root cause on the way through.
 export default function ApprovalForm({ record, onResolved }) {
   const [by, setBy] = useState("");
   const [note, setNote] = useState("");
@@ -18,10 +18,7 @@ export default function ApprovalForm({ record, onResolved }) {
     if (decision === "reject" && !note.trim()) return setErr("A note is required to reject.");
     setBusy(decision);
     try {
-      const updated = await decide(record.id, decision, {
-        by: by.trim(),
-        note: note.trim() || null,
-      });
+      const updated = await decide(record.id, decision, { by: by.trim(), note: note.trim() || null });
       onResolved(updated);
     } catch (e) {
       setErr(e.message);
@@ -30,11 +27,14 @@ export default function ApprovalForm({ record, onResolved }) {
   };
 
   return (
-    <section className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
-      <h3 className="text-sm font-semibold text-amber-200">
-        {pending.length} state-changing step(s) need a decision
+    <section
+      className="rounded-lg border p-4"
+      style={{ borderColor: "var(--color-warn)", background: "color-mix(in oklab, var(--color-warn) 7%, transparent)" }}
+    >
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--color-ink)]">
+        {pending.length} state-changing step(s) need a decision <Term term="approval-gate" />
       </h3>
-      <ul className="mt-2 space-y-1 text-xs text-zinc-300">
+      <ul className="mt-2 space-y-1 text-xs text-[var(--color-ink-muted)]">
         {pending.map((a) => (
           <li key={a.id}>
             step {a.step_index + 1}: {a.action}
@@ -47,31 +47,33 @@ export default function ApprovalForm({ record, onResolved }) {
           value={by}
           onChange={(e) => setBy(e.target.value)}
           placeholder="your name"
-          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm"
+          className="w-full rounded-md border bg-[var(--color-bg)] px-2.5 py-1.5 text-sm"
         />
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="root-cause note / reason (required to reject)"
           rows={2}
-          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm"
+          className="w-full rounded-md border bg-[var(--color-bg)] px-2.5 py-1.5 text-sm"
         />
       </div>
 
-      {err && <p className="mt-2 text-sm text-rose-400">{err}</p>}
+      {err && <p className="mt-2 text-sm text-[var(--color-critical)]">{err}</p>}
 
       <div className="mt-3 flex gap-2">
         <button
           onClick={() => act("approve")}
           disabled={busy}
-          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-md px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          style={{ background: "var(--color-ok)" }}
         >
           {busy === "approve" ? "…" : "Approve all"}
         </button>
         <button
           onClick={() => act("reject")}
           disabled={busy}
-          className="rounded bg-rose-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-md px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          style={{ background: "var(--color-critical)" }}
         >
           {busy === "reject" ? "…" : "Reject run"}
         </button>

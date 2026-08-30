@@ -7,7 +7,7 @@ grounded diagnosis — pausing for human approval before any state-changing acti
 - Design & scope: [`docs/SPEC.md`](docs/SPEC.md)
 - Decisions: [`docs/adr/`](docs/adr/)
 
-**Live:** https://runbook-cgkn.onrender.com (`/health`, `/docs`) — free tier, sleeps when idle.
+**Live:** https://runbook-cgkn.onrender.com (`/health`, `/docs`) — may cold-start after idle.
 
 **Status:** Week 0 — walking skeleton (health check + one live model call).
 

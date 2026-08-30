@@ -189,5 +189,30 @@ def test_approve_on_terminal_run_409(monkeypatch):
 def test_scenarios_endpoint_lists_the_sim_fixtures():
     resp = client.get("/api/scenarios")
     assert resp.status_code == 200
-    names = [s["name"] for s in resp.json()]
+    rows = resp.json()
+    names = [s["name"] for s in rows]
     assert "db-connection-pool-exhaustion" in names
+    # enriched fields the launcher needs
+    sc = next(s for s in rows if s["name"] == "bad-migration-table-lock")
+    assert sc["severity"] == "SEV1"
+    assert sc["expected_runbook"] and sc["metrics"]
+
+
+def test_decisions_endpoint_indexes_the_adrs():
+    resp = client.get("/api/decisions")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) >= 8
+    first = rows[0]
+    assert first["number"] == 1
+    assert first["status"] and first["title"] and first["context"]
+    assert rows == sorted(rows, key=lambda r: r["number"])
+    assert 9 not in [r["number"] for r in rows]  # ADR-0009 not surfaced publicly
+
+
+def test_evals_baseline_endpoint_returns_the_blessed_metrics():
+    resp = client.get("/api/evals/baseline")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["n_cases"] == 30
+    assert 0 <= body["metrics"]["retrieval_hit_at_3"] <= 1

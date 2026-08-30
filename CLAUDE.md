@@ -32,12 +32,13 @@ unaffected). In-memory `_RUNS` registry is the disposable live layer; Postgres i
 the SPA (mounted after the API) when present. Dev: `uvicorn` + `cd web && npm run dev` (proxies
 `/api`). Dockerfile has a `node:20` build stage.
 
-LLM provider = **OpenRouter free models** (ADR-0009). `llm.py` on the `openai` SDK: neutral
-`Turn`/`Usage`/`ToolRequest`, own 429/5xx retry, per-role model fallback chains
-(`extra_body.models`, capped at 3), `parse` via `create` + manual validation. Config chains
-(`config.py`): parse = `nvidia/nemotron-3-super-120b-a12b:free`, tool loop = `z-ai/glm-5.2:free`
-→ MiniMax, judge = GLM → nemotron. Blessed baseline: 30/30, deterministic metrics 1.00, judge
-0.91, hard checks clear. `OPENROUTER_API_KEY` in `.env` + Render.
+LLM layer = **OpenRouter** via the `openai` SDK (ADR-0009 — provider-neutral, per-role model
+routing with fallback chains). `llm.py`: neutral `Turn`/`Usage`/`ToolRequest`, own 429/5xx
+retry, `extra_body.models` chains (capped at 3), `parse` via `create` + manual validation.
+Config (`config.py`): parse = `nvidia/nemotron-3-super-120b-a12b:free`, tool loop =
+`z-ai/glm-5.2:free` → MiniMax, judge = GLM → nemotron (roster is cost-optimised; dedicated
+endpoints are a config swap). Blessed baseline: 30/30, deterministic metrics 1.00, judge 0.91,
+hard checks clear. `OPENROUTER_API_KEY` in `.env` + Render.
 
 Not started: incident memory, Langfuse tracing, redaction (S5). Nothing is executed on
 approval — no state-changing tools. The dashboard's post-resolution root-cause note is captured
@@ -75,12 +76,11 @@ approval — no state-changing tools. The dashboard's post-resolution root-cause
   Deploy: Render (Docker), `render.yaml` Blueprint, git-push-to-deploy on `main`.
 - Frontend: **Vite + React + Tailwind + react-router** in `web/`, built into `web/dist/`,
   served by FastAPI as the SPA (ADR-0010). Live run progress over **SSE**.
-- Models: **OpenRouter** (OpenAI-compatible, SDK `openai` async), **free `:free` models** —
-  ADR-0009. Per-role chains (`config.py`): triage / structured-parse workhorse =
-  `nvidia/nemotron-3-super-120b-a12b:free` (reliably enforces `json_schema` on the free tier);
-  tool loop (`diagnosis_model`) = `z-ai/glm-5.2:free` → `loop_fallbacks` (MiniMax m3, m2.7);
-  eval judge = `z-ai/glm-5.2:free` → nemotron. `llm.py` is the one call site; it owns 429/5xx
-  retry (free tier = 20 req/min) and walks each chain via `extra_body.models`.
+- Models: **OpenRouter** (OpenAI-compatible, SDK `openai` async) — ADR-0009. Per-role chains
+  (`config.py`): triage / structured-parse workhorse = `nvidia/nemotron-3-super-120b-a12b:free`
+  (reliably enforces `json_schema`); tool loop (`diagnosis_model`) = `z-ai/glm-5.2:free` →
+  `loop_fallbacks` (MiniMax m3, m2.7); eval judge = `z-ai/glm-5.2:free` → nemotron. `llm.py` is
+  the one call site; it owns 429/5xx retry and walks each chain via `extra_body.models`.
 
 ## Layout
 

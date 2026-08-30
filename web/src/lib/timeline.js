@@ -1,58 +1,93 @@
-// Pure: fold the SSE event stream into an ordered list of timeline items the
-// detail view renders. Kept separate from React so it can be unit-tested and
-// reasoned about on its own. Event shapes must match core/events.py.
+// Pure: fold the SSE event stream into an ordered list of timeline rows the
+// console view renders. Event shapes must match core/events.py. The SSE stream
+// replays its whole buffer on every (re)connect, so this must be idempotent.
 
-const LABELS = {
-  "triage.start": () => ({ label: "Triaging the alert", pending: true }),
+const ROWS = {
+  "triage.start": () => ({ phase: "triage", detail: "classifying the alert", pending: true }),
   "triage.done": (d) => ({
-    label: `Triage: ${d.category}${d.low_prior ? " (low prior — novel)" : ""}`,
+    phase: "triage",
+    detail: `${d.category}${d.low_prior ? " · low prior" : ""}`,
+    ok: true,
   }),
-  short_circuit: (d) => ({ label: `Short-circuited — ${d.category}`, tone: "muted" }),
-  "retrieve.start": () => ({ label: "Retrieving the runbook", pending: true }),
-  "retrieve.done": (d) => ({ label: `Retrieved: ${(d.docs || []).join(", ")}` }),
+  short_circuit: (d) => ({ phase: "triage", detail: `short-circuit · ${d.category}`, tone: "muted" }),
+  "retrieve.start": () => ({ phase: "retrieve", detail: "hybrid search", pending: true }),
+  "retrieve.done": (d) => ({
+    phase: "retrieve",
+    detail: `${(d.docs || []).length} doc(s) · ${(d.docs?.[0] || "").split("/").pop()}`,
+    ok: true,
+  }),
   tool_call: (d) => ({
-    label: `Tool: ${d.name}(${Object.entries(d.input || {})
+    phase: d.name,
+    detail: Object.entries(d.input || {})
       .map(([k, v]) => `${k}=${v}`)
-      .join(", ")})`,
+      .join("  "),
     tone: d.is_error ? "error" : "tool",
+    ok: !d.is_error,
+    err: d.is_error,
   }),
-  "synthesis.start": () => ({ label: "Synthesising the diagnosis", pending: true }),
+  "synthesis.start": () => ({ phase: "synthesise", detail: "drafting diagnosis", pending: true }),
   "synthesis.done": (d) => ({
-    label: `Diagnosis drafted — ${d.confidence} confidence, ${d.n_steps} step(s)`,
+    phase: "synthesise",
+    detail: `${d.confidence} confidence · ${d.n_steps} step(s)`,
+    ok: true,
   }),
   "grounding.regenerated": (d) => ({
-    label: `S3: ${d.issues} ungrounded step(s) — regenerating once`,
+    phase: "grounding",
+    detail: `${d.issues} ungrounded · regenerating`,
     tone: "warn",
   }),
   "grounding.dropped": (d) => ({
-    label: `S3: dropped ${d.count} step(s) still ungrounded`,
+    phase: "grounding",
+    detail: `dropped ${d.count} step(s)`,
     tone: "warn",
   }),
-  "guardrail.start": () => ({ label: "Guardrail: classifying actions", pending: true }),
+  "guardrail.start": () => ({ phase: "guardrail", detail: "classifying actions", pending: true }),
   "guardrail.done": (d) => {
     const sc = (d.verdicts || []).filter((v) => v.classification === "state-changing").length;
-    return { label: `Guardrail: ${sc} state-changing step(s)` };
+    return { phase: "guardrail", detail: `${sc} state-changing step(s)`, ok: true };
   },
-  disposition: (d) => ({ label: `Disposition: ${d.disposition}`, tone: "strong" }),
-  error: (d) => ({ label: `Failed: ${d.message}`, tone: "error" }),
-  finished: (d) => ({ label: `Finished — ${d.status}`, tone: "strong" }),
+  disposition: (d) => ({ phase: "disposition", detail: d.disposition, tone: "strong" }),
+  error: (d) => ({ phase: "error", detail: d.message, tone: "error", err: true }),
+  finished: (d) => ({ phase: "done", detail: d.status, tone: "strong", ok: true }),
 };
 
+export function eventKey(e) {
+  return e.type === "tool_call" ? `tool_call:${JSON.stringify(e.data || {})}` : e.type;
+}
+
 export function buildTimeline(events) {
-  const items = [];
+  const t0 = events.find((e) => e.t)?.t;
+  const rows = [];
+  const seen = new Set();
   for (const e of events) {
-    const make = LABELS[e.type];
+    const make = ROWS[e.type];
     if (!make) continue;
-    // a *.done event clears the pending flag on the matching *.start
+    const key = eventKey(e);
+    if (seen.has(key)) continue;
+    seen.add(key);
     if (e.type.endsWith(".done")) {
-      const stem = e.type.slice(0, -5);
-      const prev = items.find((it) => it.key === `${stem}.start`);
+      const prev = rows.find((r) => r.srcType === `${e.type.slice(0, -5)}.start`);
       if (prev) prev.pending = false;
     }
-    items.push({ key: e.type, ...make(e.data || {}) });
+    rows.push({
+      id: key,
+      srcType: e.type,
+      elapsed: t0 && e.t ? (e.t - t0) / 1000 : null,
+      ...make(e.data || {}),
+    });
   }
-  return items;
+  if (events.some((e) => e.type === "finished" || e.type === "error")) {
+    for (const r of rows) r.pending = false;
+  }
+  return rows;
 }
 
 export const isTerminal = (events) =>
   events.some((e) => e.type === "finished" || e.type === "error");
+
+export const fmtElapsed = (s) => {
+  if (s == null) return "  ·  ";
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `+${m}:${String(sec).padStart(2, "0")}`;
+};

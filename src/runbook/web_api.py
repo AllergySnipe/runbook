@@ -18,10 +18,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import secrets
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -283,11 +285,69 @@ async def reject_incident(run_id: str, body: Decision) -> RunRecord:
 
 @router.get("/scenarios")
 async def scenarios() -> list[dict]:
-    """The sim scenarios a run can be started against — feeds the new-incident form."""
+    """The sim scenarios a run can be started against — feeds the new-incident
+    launcher. The frontend merges editorial copy onto this by name."""
     from .sim import list_scenarios
 
     out = []
     for name in list_scenarios():
         sc = load_scenario(name)
-        out.append({"name": name, "summary": sc.summary.strip(), "severity": sc.severity})
+        out.append(
+            {
+                "name": name,
+                "title": sc.title,
+                "summary": sc.summary.strip(),
+                "severity": sc.severity or None,
+                "alert": sc.alert or None,
+                "expected_runbook": sc.expected_runbook,
+                "metrics": sc.metric_names(),
+            }
+        )
     return out
+
+
+_ADR_DIR = Path(__file__).resolve().parents[2] / "docs" / "adr"
+_ADR_FIELD = re.compile(r"^-\s+\*\*(Status|Date|Deciders):\*\*\s+(.+)$", re.MULTILINE)
+
+
+# ADRs not surfaced on the public dashboard.
+_ADR_HIDDEN: frozenset[int] = frozenset({9})
+
+
+@router.get("/decisions")
+async def decisions() -> list[dict]:
+    """Index of the architecture decision records (docs/adr/*.md) — number,
+    title, status, date, and the Context section as a teaser."""
+    out = []
+    for path in sorted(_ADR_DIR.glob("[0-9][0-9][0-9][0-9]-*.md")):
+        num = int(path.name[:4])
+        if num in _ADR_HIDDEN:
+            continue
+        text = path.read_text()
+        title = text.splitlines()[0].lstrip("# ").strip()
+        if " — " in title:
+            title = title.split(" — ", 1)[1]
+        fields = {k.lower(): v.strip() for k, v in _ADR_FIELD.findall(text)}
+        context = ""
+        if "## Context" in text:
+            context = text.split("## Context", 1)[1].split("\n## ", 1)[0].strip()
+        out.append(
+            {
+                "number": num,
+                "slug": path.stem,
+                "title": title,
+                "status": fields.get("status"),
+                "date": fields.get("date"),
+                "context": context,
+            }
+        )
+    return out
+
+
+@router.get("/evals/baseline")
+async def evals_baseline() -> dict:
+    """The blessed eval baseline (evals/baseline.json) — feeds the Evals page."""
+    path = Path(__file__).resolve().parent / "evals" / "baseline.json"
+    if not path.is_file():
+        raise HTTPException(404, "no baseline blessed yet")
+    return json.loads(path.read_text())
