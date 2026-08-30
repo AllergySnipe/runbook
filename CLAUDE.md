@@ -40,8 +40,8 @@ incidents go in the prompt as **context, never a grounding source** (S3 unchange
 otherwise). `incident_runs.memories` (S6). `events.SCHEMA_VERSION → 4` (`memory.hit`). Flywheel:
 `runbook promote <run_id>` renders a golden `EvalCase` stub from a real run (seeded from the
 confirmed outcome, labels TODO — human reviews + commits, never auto-appended);
-`.github/workflows/redteam-nightly.yml` runs the hardened red-team daily (secrets-gated, not
-`ci.yml`). Prod-verified (`run_a59ce5c8` memory hit).
+`.github/workflows/redteam.yml` runs the hardened red-team on any PR touching a defence
+surface + a weekly cron (secrets-gated, not `ci.yml`). Prod-verified (`run_a59ce5c8` memory hit).
 
 **Week 3 not started:** Langfuse tracing · `/security` dashboard page. Nothing executes on
 approval — no state-changing tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync

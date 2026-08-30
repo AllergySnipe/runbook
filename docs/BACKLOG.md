@@ -29,6 +29,7 @@ Things we've deliberately decided to do *later*, so they don't clog the current 
 - ~~**Red-team → eval flywheel**~~ — done (ADR-0016). Two mechanisms: `runbook promote
   <run_id>` renders a golden `EvalCase` stub from a real incident run (seeded from the
   human-confirmed `runbook outcome`, labels marked TODO — the human reviews + commits); and
-  `.github/workflows/redteam-nightly.yml` runs the full hardened red-team daily, so every
-  attack in `attacks.py` is a standing regression assertion. Red-team attacks stay a separate
-  suite (different scorers + bar), not folded into `cases.py`.
+  `.github/workflows/redteam.yml` runs the full hardened red-team on any PR that touches a
+  defence surface (`prompts/**`, `core/loop|guardrail|triage`, `rag/**`, `redteam/**`), plus a
+  weekly cron backstop, so every attack in `attacks.py` is a standing regression assertion.
+  Red-team attacks stay a separate suite (different scorers + bar), not folded into `cases.py`.

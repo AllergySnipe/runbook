@@ -47,15 +47,25 @@ This makes the intended path **outcome → promote**: the same human confirmatio
 that feeds incident memory (ADR-0015) also seeds the eval label. One act of
 review, two durable artifacts.
 
-### 2. Red-team attacks stay a separate suite, run nightly
+### 2. Red-team attacks stay a separate suite, triggered by the change
 
 The full `redteam/attacks.py` list already **is** the regression set — `runbook
 redteam` exits non-zero on any hardened-condition success or errored case. What
-was missing is a schedule: it's kept out of `ci.yml` because it makes real model
-calls (ADR-0012 §4). `.github/workflows/redteam-nightly.yml` runs
-`runbook redteam --condition hardened` daily (and on `workflow_dispatch`) with
-the secrets, uploading the JSON report. A closed hole that reopens fails the job
-within a day.
+was missing is a trigger. It's kept out of `ci.yml` (real model + retrieval
+calls, needs secrets — ADR-0012 §4), so `.github/workflows/redteam.yml` runs
+`runbook redteam --condition hardened` on:
+
+- **`pull_request`** touching a defence surface (`prompts/**`, `core/loop.py`,
+  `core/guardrail.py`, `core/triage.py`, `rag/**`, `redteam/**`) — the trigger
+  that actually reopens a hole is a change to one of these, and running on the PR
+  **blocks** the regression instead of reporting it after merge.
+- **`schedule`** weekly — a cheap backstop for drift that never touches those
+  files: a dependency/model bump, a `config.py` model swap, the served model
+  changing under a pinned `:free` name.
+- **`workflow_dispatch`** — on demand.
+
+An incident happening is *not* a trigger — the defences don't change because
+someone got paged.
 
 A promoted attack does **not** become an `EvalCase`. A poisoned-log case has
 different inputs (an injected surface), a different success definition (a
@@ -72,18 +82,27 @@ with a `control/*` peer where disposition manipulation is in scope.
 - **One unified "regression" command over both eval + red-team.** Rejected —
   different scorers, different bars, different CI story (one has no secrets, one
   needs them). A shared entry point would hide that.
-- **Run the red-team in `ci.yml` on a label / manual trigger only.** The nightly
-  schedule is strictly better for a regression guard — it catches a drift even
-  when nobody thought to run it — and `workflow_dispatch` still covers on-demand.
+- **Run the red-team after every real incident run.** Rejected — the defences
+  don't change per incident, so this would re-run an expensive (~15–25 real loop
+  runs, 429-prone) suite for no new signal, and burn the rate limit that live
+  runs need.
+- **A nightly `schedule` only.** Rejected in favour of the PR trigger: nightly
+  reports a regression up to 24h *after* the change that caused it, and burns CI
+  every day even when nothing relevant changed. The PR trigger catches it at the
+  right moment; the weekly cron keeps the out-of-path safety net.
+- **Run the red-team in `ci.yml`.** Rejected — `ci.yml` is deliberately
+  secret-free and deterministic (ADR-0008/0012); mixing in real model calls
+  breaks that contract for every push.
 
 ## Consequences
 
 - New CLI `runbook promote`; new `evals/promote.py` + `render_case_stub` export.
-- New `.github/workflows/redteam-nightly.yml` — needs `OPENROUTER_API_KEY`,
-  `JINA_API_KEY`, `DATABASE_URL`, `DATABASE_URL_UNPOOLED` repo secrets.
+- New `.github/workflows/redteam.yml` (PR-on-defence-surface + weekly + manual) —
+  needs `OPENROUTER_API_KEY`, `JINA_API_KEY`, `DATABASE_URL`,
+  `DATABASE_URL_UNPOOLED` repo secrets.
 - `docs/BACKLOG.md` "Red-team → eval flywheel" item closed;
-  `docs/security/log-injection.md` §5 re-run note points at the nightly job.
+  `docs/security/log-injection.md` §5 re-run note points at the workflow.
 - **Revisit if:** promoted cases accumulate enough that they want their own list
-  + a "promoted from" provenance field on `EvalCase`; or the nightly red-team's
-  free-tier flakiness (429s → errored cases → red job) needs a retry/quarantine
-  lane distinct from a real regression.
+  + a "promoted from" provenance field on `EvalCase`; or the red-team's free-tier
+  flakiness (429s → errored cases → red job) needs a retry/quarantine lane
+  distinct from a real regression.
