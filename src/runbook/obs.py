@@ -194,13 +194,22 @@ def span(name: str, *, as_type: str = "span", input: Any = None) -> Iterator[Any
 
 
 def score(
-    name: str, value: float, *, trace_id: str | None = None, comment: str | None = None
+    name: str,
+    value: float | str,
+    *,
+    trace_id: str | None = None,
+    data_type: str | None = None,
+    comment: str | None = None,
 ) -> None:
-    """Attach a score to a trace. Unused in slice 1 (tracing); the seam for
-    online scoring (ADR-0017 "Revisit if")."""
+    """Attach a score to an existing trace by id (`create_score` — no active
+    trace context needed). Used by `core/scoring.py` for online scoring
+    (ADR-0018). `value` is a float for NUMERIC / BOOLEAN, a str for CATEGORICAL;
+    `data_type` is inferred by Langfuse when omitted. No-op when tracing is off."""
     if _client is None:
         return
     try:
-        _client.create_score(name=name, value=value, trace_id=trace_id, comment=comment)
+        _client.create_score(
+            name=name, value=value, trace_id=trace_id, data_type=data_type, comment=comment
+        )
     except Exception:
         log.debug("langfuse score failed", exc_info=True)

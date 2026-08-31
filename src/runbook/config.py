@@ -100,6 +100,17 @@ class Settings(BaseSettings):
     # experiments out of the prod dashboards / evaluators.
     langfuse_environment: str = "development"
 
+    # Online scoring (ADR-0018). After a real run persists, a sampled fraction get
+    # graded by reference-free scorers (S1-S3 invariant re-checks + grounding
+    # coverage + retrieval confidence + disposition) — no label, no model call.
+    # Scores land in `online_scores` (0013) AND on the run's Langfuse trace.
+    # Never runs for evals / red-team (same rule as tracing / cache / memory).
+    # `scoring_sample_rate` is a separate knob from `langfuse_sample_rate`: you
+    # may trace every run but score only some. 1.0 here — traffic is trivial; the
+    # knob exists so the scaling answer is real (ADR-0017 §5, same reasoning).
+    scoring_enabled: bool = True
+    scoring_sample_rate: float = 1.0
+
     # Model routing (ADR-0009 — free OpenRouter models). Free `:free` endpoints
     # each sit on ONE shared provider pool and 429 often, so every role is a
     # *chain*: OpenRouter walks it on a 429/5xx (`extra_body.models`).

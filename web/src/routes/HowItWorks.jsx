@@ -85,14 +85,16 @@ const DEEP = {
     ),
   },
   record: {
-    why: "One row per run is the audit record and, later, the flywheel: a human's root-cause correction becomes a new golden eval case and an entry in incident memory.",
+    why: "One row per run is the audit record and, later, the flywheel: a human's root-cause correction — or a low online score on a real run — becomes a new golden eval case and an entry in incident memory.",
     detail: (
       <>
         The <Term term="audit-record">audit row</Term> (<strong>S6</strong>) captures the trigger,
         the retrieved set, every tool call and its result, the proposal, the guardrail verdict, token
         usage, and each approval decision with who and when. Alongside it, one{" "}
         <Term term="tracing">Langfuse trace</Term> per run records the same path as a nested timeline
-        of model calls — latency, tokens, and the exact context each call saw.
+        of model calls — latency, tokens, and the exact context each call saw. A sampled fraction of
+        real runs is then <Term term="online-scoring">online-scored</Term> — do the safety invariants
+        still hold on live traffic, and how well-grounded was the proposal?
       </>
     ),
   },

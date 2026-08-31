@@ -437,6 +437,92 @@ def run_stats(limit: int = 50) -> dict:
     }
 
 
+@dataclass
+class ScoreRecord:
+    name: str
+    value_num: float | None
+    value_text: str | None
+    data_type: str
+    comment: str | None
+    created_at: datetime
+
+    @property
+    def value(self) -> float | str:
+        return self.value_text if self.value_text is not None else float(self.value_num or 0.0)
+
+
+def record_online_scores(run_id: str, scores: list) -> None:
+    """Upsert the reference-free online scores for one run (ADR-0018, migration
+    0013). One row per `(run_id, name)`: a re-score replaces the value. Each
+    `scores` item is a `core.scoring.Score` (name / data_type / value / comment)."""
+    if not scores:
+        return
+    with connect() as conn, conn.transaction():
+        for s in scores:
+            is_text = s.data_type == "CATEGORICAL"
+            conn.execute(
+                """
+                insert into online_scores
+                    (run_id, name, value_num, value_text, data_type, comment)
+                values (%s, %s, %s, %s, %s, %s)
+                on conflict (run_id, name) do update set
+                    value_num = excluded.value_num, value_text = excluded.value_text,
+                    data_type = excluded.data_type, comment = excluded.comment,
+                    created_at = now()
+                """,
+                (
+                    run_id,
+                    s.name,
+                    None if is_text else float(s.value),
+                    s.value if is_text else None,
+                    s.data_type,
+                    s.comment,
+                ),
+            )
+
+
+def get_scores(run_id: str) -> list[ScoreRecord]:
+    """The online scores recorded for one run, if any. Best-effort — a missing
+    table reads as 'no scores' (safe to ship ahead of migration 0013)."""
+    try:
+        with connect() as conn:
+            rows = conn.execute(
+                "select name, value_num, value_text, data_type, comment, created_at "
+                "from online_scores where run_id = %s order by name",
+                (run_id,),
+            ).fetchall()
+    except Exception:  # noqa: BLE001 - best-effort read
+        return []
+    return [ScoreRecord(*r) for r in rows]
+
+
+def list_recent_scores(limit: int = 20) -> dict[str, list[ScoreRecord]]:
+    """The most recently scored runs → their scores, newest run first. Feeds
+    `runbook scores` (the flywheel on-ramp)."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            with recent as (
+                select run_id, max(created_at) as scored_at
+                from online_scores
+                group by run_id
+                order by scored_at desc
+                limit %s
+            )
+            select s.run_id, s.name, s.value_num, s.value_text, s.data_type, s.comment,
+                   s.created_at, recent.scored_at
+            from online_scores s
+            join recent on recent.run_id = s.run_id
+            order by recent.scored_at desc, s.name
+            """,
+            (limit,),
+        ).fetchall()
+    out: dict[str, list[ScoreRecord]] = {}
+    for r in rows:
+        out.setdefault(r[0], []).append(ScoreRecord(*r[1:7]))
+    return out
+
+
 def set_featured(run_id: str, on: bool) -> bool:
     """Mark/unmark a run as a curated exemplar. Returns True if the run exists."""
     with connect() as conn, conn.transaction():

@@ -4,7 +4,10 @@ Two kinds (ADR-0008, SPEC "How we'll know it works"):
 
 - **Hard checks** — boolean, no model, **must be 100%**. They re-verify the
   safety invariants (SPEC S1-S3) against *real* model output: a single failure
-  fails the eval. Each maps to one invariant.
+  fails the eval. Each maps to one invariant. The same three invariants are
+  re-checked on live traffic by `core/scoring.py::_score_safety_invariants`
+  (ADR-0018); `tests/test_scoring.py::test_consistent_with_eval_hard_checks`
+  pins the two implementations together.
 - **Soft metrics** — graded and aggregated against a threshold in `report.py`.
   `None` means "not applicable to this case" (e.g. retrieval hit-rate on a case
   that short-circuited before retrieval).

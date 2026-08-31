@@ -22,6 +22,14 @@ Things we've deliberately decided to do *later*, so they don't clog the current 
   stack, and the residual risks. Narrative sourced from `docs/security/log-injection.md`
   (still canonical) via `web/src/content/security.js`.
 
+- ~~**Online scoring on sampled runs**~~ — done (ADR-0018, migration 0013):
+  `core/scoring.py` grades a sampled fraction of real runs with reference-free scorers
+  (`safety-invariants` / `grounding-coverage` / `retrieval-confidence` / `disposition`) after
+  `record_run()` in the CLI + web paths; scores → `online_scores` + the Langfuse trace;
+  `runbook scores --low` is the prod→eval on-ramp. **Deferred:** the reference-free
+  plausibility LLM judge (needs calibration — ADR-0018 §2) and a `GET /api/scores` dashboard
+  panel (ADR-0018 §7).
+
 - **Poisoned-doc hydration hardening** — `core/loop.py::_full_doc` hydrates the full source
   for the top retrieved chunk when it has an on-disk `path`. A retrieved doc with no path
   falls back to its chunk text, which is the vector by which a poisoned corpus document

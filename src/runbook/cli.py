@@ -13,6 +13,7 @@ runbook reject <id> --note "why" [--by]  reject a run (whole run → rejected)
 runbook feature <id> [--unfeature]       mark a run as a curated dashboard exemplar
 runbook outcome <id> --root-cause "…"    record the confirmed root cause as incident memory
 runbook promote <id>                     render a golden EvalCase stub from a real run
+runbook scores [--low] [-n N]            recently online-scored real runs (ADR-0018)
 runbook sim <action> [scenario] ...      poke the fixture-backed sim by hand
 runbook eval [--scenario N] [--no-judge]  run the golden eval set through the real loop
 runbook redteam [--condition C] [-j N]    run the log-injection red-team harness
@@ -93,9 +94,10 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
         result = asyncio.run(
             diagnose(alert, args.scenario, k=args.k, use_cache=True, use_memory=True)
         )
+        rc = _render_diagnosis(result, alert)  # persists the run + online-scores it
     finally:
-        obs.flush()  # short-lived process — push the trace before we exit
-    return _render_diagnosis(result, alert)
+        obs.flush()  # short-lived process — push the trace + scores before we exit
+    return rc
 
 
 def _render_diagnosis(result, alert: str) -> int:
@@ -184,8 +186,9 @@ def _render_diagnosis(result, alert: str) -> int:
 
 
 def _persist_run(result) -> None:
-    """Write the run to Postgres (the audit record + any pending approvals).
-    A DB failure is surfaced but not fatal — the diagnosis already printed."""
+    """Write the run to Postgres (the audit record + any pending approvals), then
+    online-score it (ADR-0018). A DB failure is surfaced but not fatal — the
+    diagnosis already printed."""
     from .core import record_run
 
     try:
@@ -199,6 +202,25 @@ def _persist_run(result) -> None:
         print(f"  {n} state-changing step(s) need a human decision:")
         print(f"    runbook approve {run.id} --by <you>")
         print(f"    runbook reject  {run.id} --by <you> --note '<why>'")
+
+    from .core import score_and_record, should_score
+    from .core.scoring import is_low
+
+    if should_score():
+        try:
+            scores = score_and_record(run.id, result)
+        except Exception as exc:  # noqa: BLE001 - scoring must never fail a run
+            print(f"  (not scored: {exc})")
+            return
+        low = [s for s in scores if is_low(s.name, s.value)]
+        print("  online scores:" + ("  ⚠ LOW" if low else ""))
+        for s in scores:
+            v = s.value if isinstance(s.value, str) else f"{s.value:.3f}"
+            print(f"    {s.name:22s} {v}" + (f"   {s.comment}" if s.comment else ""))
+        if low:
+            print(
+                f'    → promote:  runbook outcome {run.id} --root-cause "…"  &&  runbook promote {run.id}'
+            )
 
 
 def _cmd_triage(args: argparse.Namespace) -> int:
@@ -285,6 +307,17 @@ def _cmd_run_show(args: argparse.Namespace) -> int:
         print(f"    {oc.actual_root_cause}")
         if oc.actual_failure_mode:
             print(f"    failure_mode: {oc.actual_failure_mode}")
+
+    from .core import get_scores
+    from .core.scoring import is_low
+
+    scores = get_scores(r.id)
+    if scores:
+        print("\n  online scores (ADR-0018):")
+        for s in scores:
+            v = s.value if isinstance(s.value, str) else f"{s.value:.3f}"
+            mark = " ⚠" if is_low(s.name, s.value) else ""
+            print(f"    {s.name:22s} {v}{mark}" + (f"   {s.comment}" if s.comment else ""))
 
     if r.usage.get("by_model"):
         print("  cost by model (est. at paid prices):")
@@ -400,6 +433,40 @@ def _cmd_promote(args: argparse.Namespace) -> int:
         return 1
 
     print(render_case_stub(r, outcome))
+    return 0
+
+
+def _cmd_scores(args: argparse.Namespace) -> int:
+    """Recently online-scored runs (ADR-0018), newest first. `--low` keeps only
+    runs that tripped a scorer and prints the promote-into-the-eval-set on-ramp
+    for each — the flywheel from real traffic (not just red-team / offline)."""
+    from .core import list_recent_scores
+    from .core.scoring import is_low
+
+    runs = list_recent_scores(limit=args.n)
+    if not runs:
+        print("no online-scored runs")
+        return 0
+
+    shown = 0
+    for run_id, scores in runs.items():
+        low_names = {s.name for s in scores if is_low(s.name, s.value)}
+        if args.low and not low_names:
+            continue
+        shown += 1
+        when = scores[0].created_at
+        print(f"\n{run_id}  {when:%Y-%m-%d %H:%M}" + ("   ⚠ LOW" if low_names else ""))
+        for s in scores:
+            v = s.value if isinstance(s.value, str) else f"{s.value:.3f}"
+            mark = " ⚠" if s.name in low_names else ""
+            print(f"  {s.name:22s} {v}{mark}" + (f"   {s.comment}" if s.comment else ""))
+        if low_names:
+            print(
+                f'  → promote:  runbook outcome {run_id} --root-cause "…"  '
+                f"&&  runbook promote {run_id}"
+            )
+    if args.low and shown == 0:
+        print(f"no low-scoring runs in the last {args.n} scored")
     return 0
 
 
@@ -727,6 +794,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="promote even without a recorded outcome"
     )
     promote.set_defaults(func=_cmd_promote)
+
+    scores = sub.add_parser(
+        "scores", help="recently online-scored runs (ADR-0018); --low = the flywheel on-ramp"
+    )
+    scores.add_argument("--low", action="store_true", help="only runs that tripped a scorer")
+    scores.add_argument("-n", type=int, default=20, help="how many recent scored runs (default 20)")
+    scores.set_defaults(func=_cmd_scores)
 
     ev = sub.add_parser("eval", help="run the golden eval set through the real loop")
     ev.add_argument("--scenario", action="append", help="limit to a sim scenario (repeatable)")

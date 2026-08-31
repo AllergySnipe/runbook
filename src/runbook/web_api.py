@@ -35,6 +35,7 @@ from .core import events as ev
 from .core.events import Event
 from .core.loop import diagnose
 from .core.memory import get_outcome, record_outcome
+from .core.scoring import score_and_record, should_score
 from .core.store import (
     RunRecord,
     get_run,
@@ -110,6 +111,13 @@ async def _run_incident(run: IncidentRun, k: int) -> None:
         )
         rec = await asyncio.to_thread(record_run, result, run_id=run.id)
         run.publish(ev.event(ev.FINISHED, run_id=run.id, status=rec.status))
+        # online scoring (ADR-0018) — after the terminal event so a slow write
+        # never stalls the SSE stream; best-effort, never fails the run.
+        if should_score():
+            try:
+                await asyncio.to_thread(score_and_record, run.id, result)
+            except Exception:
+                log.exception("online scoring failed for incident %s", run.id)
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # fire-and-forget: narrate the failure, never crash the server

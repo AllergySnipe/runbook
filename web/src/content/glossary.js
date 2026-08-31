@@ -143,4 +143,8 @@ export const GLOSSARY = {
     title: "Tracing (observability)",
     body: "One Langfuse trace per run: a nested timeline of every model call (prompt, tokens, latency, cost) and step (triage, retrieve, tool-loop, synthesis, guardrail). The audit record says what a run decided; the trace shows how — which call was slow, what the model saw. Secrets are masked before a trace leaves the process (S5).",
   },
+  "online-scoring": {
+    title: "Online scoring",
+    body: "The eval set grades the loop against known-correct answers before a change ships. Online scoring grades a sample of real runs, continuously — but a real alert has no label, so it can only use reference-free scorers: re-checking the S1–S3 safety invariants on the live output, and measuring grounding coverage and retrieval confidence. Scores land on the run's trace; a low one is a one-command path to a new eval case.",
+  },
 };

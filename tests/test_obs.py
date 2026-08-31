@@ -71,6 +71,9 @@ def test_span_is_transparent_when_off():
 def test_flush_and_score_safe_when_off():
     obs.flush()
     obs.score("grounding_ok", 1.0, trace_id="abc")  # both no-ops, no raise
+    # online scoring (ADR-0018) passes a data_type and, for `disposition`, a str value
+    obs.score("safety-invariants", 0.0, trace_id="abc", data_type="BOOLEAN", comment="S1 broke")
+    obs.score("disposition", "escalate", trace_id="abc", data_type="CATEGORICAL")
 
 
 # --- S5: masking hooks route through redact() ----------------------------

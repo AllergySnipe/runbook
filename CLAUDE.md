@@ -44,12 +44,12 @@ half of the flywheel was tried as a CI gate and removed — too noisy to gate on
 (ADR-0016 §2); `runbook redteam` stays a manual point-in-time tool. Prod-verified
 (`run_a59ce5c8` memory hit).
 
-**Week 3 — `/security` dashboard page** (done, not yet deployed): `GET /api/redteam` serves a
-tracked `src/runbook/redteam/latest.json` snapshot (`redteam-results/` is gitignored → absent
-from the image), blessed by `runbook redteam --condition both --bless` (parallel to
-`evals/baseline.json`). `web/src/routes/Security.jsx` + `web/src/content/security.js` render ASR
-by surface/goal (baseline vs hardened), attacks-that-got-through + containment, defence stack,
-residual risks. Narrative canonical in `docs/security/log-injection.md`. 302 tests green locally.
+**Week 3 — `/security` dashboard page** (done + deployed): `GET /api/redteam` serves a tracked
+`src/runbook/redteam/latest.json` snapshot (`redteam-results/` is gitignored → absent from the
+image), blessed by `runbook redteam --condition both --bless` (parallel to `evals/baseline.json`).
+`web/src/routes/Security.jsx` + `web/src/content/security.js` render ASR by surface/goal
+(baseline vs hardened), attacks-that-got-through + containment, defence stack, residual risks.
+Narrative canonical in `docs/security/log-injection.md`.
 
 **Week 3 — Langfuse tracing** (ADR-0017, `migrations/0012`): `src/runbook/obs.py` is the one
 integration point — a **no-op unless `obs.setup()` ran** (CLI `diagnose` + the web app only;
@@ -62,11 +62,27 @@ backstopping `llm._redact_outgoing`. `incident_runs.langfuse_trace_id` + `_trace
 link; `runbook run <id>` / `runbook diagnose` print the URL (no link from the no-auth web
 dashboard — public traces were tried and dropped, ADR-0017 §6). Langfuse **Cloud hobby tier**
 (US region), `LANGFUSE_ENVIRONMENT` = development locally / production on Render. Prod-verified.
-**Online scoring is not built** (the `obs.score()` stub is the seam).
 
-**Not built:** online scoring on sampled runs. Nothing executes on approval — no state-changing
-tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync (blocking HTTP, only via
-`asyncio.to_thread` / CLI). Check before assuming a module exists.
+**Week 3 — online scoring** (ADR-0018, `migrations/0013`): `src/runbook/core/scoring.py` grades
+a sampled fraction of **real** runs — reference-free only (no label online): `safety-invariants`
+(BOOLEAN — S1–S3 re-checked live, mirrors `evals/scorers.py` hard checks), `grounding-coverage`,
+`retrieval-confidence` (top chunk rerank score), `disposition` (CATEGORICAL, for slicing). Runs
+after `record_run()` in the CLI `diagnose` + web `_run_incident` only (never evals/red-team);
+best-effort. Scores → `online_scores` (upsert on `(run_id, name)`) **and** the run's Langfuse
+trace (`create_score`). `scoring_sample_rate` (1.0) is separate from `langfuse_sample_rate`.
+Flywheel on-ramp: `runbook scores --low` flags tripped runs + prints the `outcome`/`promote`
+commands. **No LLM judge** (deferred — needs calibration) and **no dashboard panel** (ADR-0018
+§2, §7).
+
+**CI is green** (`b8460f8`, first green run in the repo — was red since commit #4): `config.py`
+`database_url` / `database_url_unpooled` now default to `""` so `get_settings()` works with no
+DB. Verify a checkpoint the CI way: `env DATABASE_URL= DATABASE_URL_UNPOOLED= uv run pytest -q`
+(integration suites must skip, not error) + `ruff check . && ruff format --check .` (whole repo).
+
+**Not built:** the reference-free plausibility judge (ADR-0018 "Revisit if"). Nothing executes
+on approval — no state-changing tools. `retrieve()` + tools + `cache.py` + `memory.py` +
+`scoring.py` persistence are sync (blocking HTTP/psycopg, only via `asyncio.to_thread` / CLI).
+Check before assuming a module exists.
 
 ## Golden rules
 
@@ -92,10 +108,11 @@ tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync (blocking HTTP, 
   applier (Week 1).
 - **Pydantic** for all model-facing structured output; **pydantic-settings** for config
   (`src/runbook/config.py`, lazy via `get_settings()`).
-- **Langfuse** (v4, Cloud hobby tier) — LLM tracing, ADR-0017. One trace per `diagnose()`
-  run; `src/runbook/obs.py` is the one call site (no-op without keys / when `setup()` wasn't
-  called). Auto-instruments model calls via `langfuse.openai`; manual typed spans for the
-  loop's phases. Online scoring not built.
+- **Langfuse** (v4, Cloud hobby tier) — LLM tracing (ADR-0017) + online scoring (ADR-0018).
+  One trace per `diagnose()` run; `src/runbook/obs.py` is the one call site (no-op without keys
+  / when `setup()` wasn't called). Auto-instruments model calls via `langfuse.openai`; manual
+  typed spans for the loop's phases. `core/scoring.py` `create_score`s a sampled fraction of
+  real runs (reference-free scorers only — no LLM judge yet).
 - **Docker** — single image; listens on `$PORT` (`8000` locally).
   Deploy: Render (Docker), `render.yaml` Blueprint, git-push-to-deploy on `main`.
 - Frontend: **Vite + React + Tailwind + react-router** in `web/`, built into `web/dist/`,
@@ -117,11 +134,12 @@ migrations/        plain .sql files, applied by `runbook migrate`
 corpus/synthetic/  hand-written paymentsvc runbooks (committed; part of the corpus)
 data/raw/          ingest cache — fetched tarballs + postmortem text (gitignored)
 src/runbook/       app.py (FastAPI), config.py, llm.py (one model-call site),
-                   obs.py (one Langfuse-tracing call site), db.py,
+                   obs.py (one Langfuse tracing/scoring call site), db.py,
                    cli.py, migrate.py, embed.py, ingest/ (fetch + chunk + load),
                    rag/ (hybrid retrieve + rerank), sim/ (fixture env + scenarios/),
                    tools.py (read-only tools + schemas + allowlist),
-                   core/ (triage + loop + guardrail + store + events), prompts/ (versioned),
+                   core/ (triage + loop + guardrail + store + events + cost + cache + memory
+                   + scoring), prompts/ (versioned),
                    evals/ (golden set + scorers + judge + runner + report + baseline.json),
                    redteam/ (log-injection harness: attacks + inject + ablate + detect + report),
                    web_api.py (REST + SSE — the dashboard backend)
@@ -152,6 +170,7 @@ uv run runbook approve <id> [--step N] [--by NAME]      approve a run's pending 
 uv run runbook reject <id> --note "why" [--by NAME]     reject a run (whole run → rejected)
 uv run runbook feature <id> [--unfeature]               mark a run as a curated dashboard exemplar
 uv run runbook sim <action> <scenario> [...]            inspect the sim (list|show|metrics|logs|deploys|deps)
+uv run runbook scores [--low] [-n N]                    recently online-scored real runs (ADR-0018); --low = the flywheel on-ramp
 uv run runbook eval [--scenario N] [--no-judge] [-j N]  golden eval set → real loop → scorecard vs baseline
 uv run runbook eval --update-baseline                   on a clean run, re-bless evals/baseline.json
 uv run runbook eval --bless eval-results/<run>.json      bless a prior --json run without re-running
