@@ -8,6 +8,7 @@ registry, SSE replay + live streaming, and the approve/reject wiring.
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -97,14 +98,26 @@ def _wire(monkeypatch):
     web_api._RUNS.clear()
 
 
+_SSE_TERMINAL = {ev.FINISHED, ev.ERROR}
+
+
 def _drain_sse(run_id: str) -> list[str]:
-    """Open the SSE stream and collect event names until it closes."""
+    """Collect the SSE event names for a run. Reconnects until the last event is
+    terminal — under `TestClient` the stream can close early (a spurious
+    `is_disconnected()` on a slow runner) before the background task publishes
+    `finished`/`error`; reconnecting replays the full buffer once the run is done
+    (the route is explicitly reconnect-safe)."""
     names: list[str] = []
-    with client.stream("GET", f"/api/incidents/{run_id}/events") as r:
-        assert r.status_code == 200
-        for line in r.iter_lines():
-            if line.startswith("event:"):
-                names.append(line.split(":", 1)[1].strip())
+    for _ in range(100):
+        names = []
+        with client.stream("GET", f"/api/incidents/{run_id}/events") as r:
+            assert r.status_code == 200
+            for line in r.iter_lines():
+                if line.startswith("event:"):
+                    names.append(line.split(":", 1)[1].strip())
+        if names and names[-1] in _SSE_TERMINAL:
+            break
+        time.sleep(0.02)
     return names
 
 
