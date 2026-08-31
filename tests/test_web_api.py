@@ -104,7 +104,10 @@ def _run_to_completion(scenario: str = "db-connection-pool-exhaustion", *, k: in
     import asyncio
 
     run = web_api.IncidentRun(
-        id="run_" + scenario[:6], alert="alert text", scenario=scenario, created_at=datetime.now(UTC)
+        id="run_" + scenario[:6],
+        alert="alert text",
+        scenario=scenario,
+        created_at=datetime.now(UTC),
     )
     web_api._RUNS[run.id] = run
     asyncio.run(web_api._run_incident(run, k))
