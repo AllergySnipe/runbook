@@ -6,8 +6,8 @@
 --
 --   langfuse_trace_id   the 32-char W3C trace id — canonical, for `langfuse-cli`
 --                       lookups and future online-scoring linkage
---   langfuse_trace_url  the ready-to-open dashboard link — the "trace ↗" the
---                       IncidentDetail page renders (best-effort; may be NULL if
+--   langfuse_trace_url  the Langfuse URL, printed by `runbook run <id>` for
+--                       whoever operates the system (best-effort; may be NULL if
 --                       the project-URL lookup failed even though the id is set)
 --
 -- Both nullable, no default: NULL means tracing was off for that run (every row

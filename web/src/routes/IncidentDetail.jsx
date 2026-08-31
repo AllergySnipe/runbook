@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Check, X, ExternalLink } from "lucide-react";
+import { ArrowLeft, Check, X } from "lucide-react";
 import { getIncident, openEventStream } from "../api.js";
 import { buildTimeline, eventKey, isTerminal, fmtElapsed } from "../lib/timeline.js";
 import { fmtTime, fmtDuration, fmtTokens, fmtUSD } from "../lib/format.js";
@@ -96,22 +96,9 @@ export default function IncidentDetail() {
                 {copy.impact}
               </p>
             )}
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-[0.7rem] text-[var(--color-ink-faint)]">
-              <span>
-                {id}
-                {rec && ` · ${fmtTime(rec.created_at)}`}
-              </span>
-              {rec?.langfuse_trace_url && (
-                <a
-                  href={rec.langfuse_trace_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline"
-                  title="Open this run's full trace in Langfuse"
-                >
-                  trace <ExternalLink size={11} />
-                </a>
-              )}
+            <p className="mt-1 font-mono text-[0.7rem] text-[var(--color-ink-faint)]">
+              {id}
+              {rec && ` · ${fmtTime(rec.created_at)}`}
             </p>
           </header>
 

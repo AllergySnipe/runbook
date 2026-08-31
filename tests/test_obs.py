@@ -57,7 +57,7 @@ def test_setup_noop_without_keys(monkeypatch):
 
 
 def test_trace_is_transparent_when_off():
-    with obs.trace("diagnose", input={"alert": "x"}, tags=["diagnose"]) as tr:
+    with obs.trace("diagnose", input={"alert": "x"}, metadata={"k": 4}) as tr:
         assert tr.trace_id is None
         assert tr.trace_url is None
         tr.update_output({"disposition": "auto"})  # must not raise

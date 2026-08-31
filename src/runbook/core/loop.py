@@ -315,7 +315,6 @@ async def diagnose(
         name="diagnose",
         input={"alert": redact(alert).text, "scenario": scenario_name},
         metadata={"use_cache": use_cache, "use_memory": use_memory, "k": k},
-        tags=["diagnose"],
     ) as tr:
         result = await _diagnose(
             alert,

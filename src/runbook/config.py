@@ -35,8 +35,11 @@ class Settings(BaseSettings):
     # Postgres (Neon). `database_url` is the pooled connection (PgBouncer) — used by
     # the app at runtime. `database_url_unpooled` is the direct connection — used by
     # the migration applier, which needs session-level features the pooler drops.
-    database_url: str
-    database_url_unpooled: str
+    # Default "" so `get_settings()` works with no DB (CI, offline unit runs) — the
+    # `*_integration.py` suites and the retrieval-quality gate skip on a falsy
+    # `database_url`; anything that actually opens a connection fails loudly.
+    database_url: str = ""
+    database_url_unpooled: str = ""
 
     # Embeddings (ADR-0002 → ADR-0013): hosted Jina model. Changing either value
     # means a new migration for the vector dimension + a full re-embed

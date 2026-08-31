@@ -91,13 +91,29 @@ trace JSON (every prompt, completion, span field) — only `[redacted:connection
 Traffic is trivial (a demo), so everything is traced; the knob exists so the
 scaling answer is real, not hand-waved.
 
-### 6. Link trace ↔ audit row
+### 6. Link the trace to the audit row (id in the DB, URL on the console)
 
 `migrations/0012` adds `incident_runs.langfuse_trace_id` (canonical W3C id, for
 `langfuse-cli` / future online-scoring linkage) and `langfuse_trace_url` (the
-ready-to-open dashboard link, best-effort via `Langfuse.get_trace_url()`). Both
-nullable — NULL means tracing was off. The dashboard's IncidentDetail renders a
-"trace ↗" link; `runbook run <id>` and `runbook diagnose` print the URL.
+Langfuse URL, best-effort via `Langfuse.get_trace_url()`). Both nullable — NULL
+means tracing was off. `runbook run <id>` and `runbook diagnose` print the URL;
+it's for whoever operates the system and has Langfuse access.
+
+**No link from the web dashboard.** The dashboard has no auth (SPEC), and a
+Langfuse URL sits behind a project login — useless to a portfolio visitor.
+Making individual traces public was tried and dropped: `set_current_trace_as_public()`
+is clobbered on ingest by the `langfuse.openai` wrapper (which pins every
+generation to the trace and resets trace-level attributes), so it only holds via
+an out-of-band `trace-create` ingestion upsert — more moving parts than a
+demo-visible link is worth. Tracing stays a *documented* capability (this ADR,
+the HowItWorks page, `/decisions`); the live artifact is the console's own
+run-anatomy view, which already shows the retrieved context, every tool call, and
+the proposal.
+
+**No trace tags.** `propagate_attributes(tags=…)` combined with child spans is
+buggy in the current SDK (v4.15), and the only tag worth setting (`diagnose`)
+duplicates the trace name. Per-run dimensions (`use_cache`, `use_memory`, `k`) go
+in trace `metadata`.
 
 ## Consequences
 
@@ -135,3 +151,7 @@ nullable — NULL means tracing was off. The dashboard's IncidentDetail renders 
 - **Offline-eval observability** — tracing each eval case (behind an
   `origin`-style flag) so a regression is inspectable as a trace, not just a
   scorecard delta.
+- **A demo-visible trace** — if the portfolio wants a clickable trace, the clean
+  path is an out-of-band `trace-create` ingestion upsert setting `public: true`
+  (an SDK-internal `_resources.add_trace_task`), not `set_current_trace_as_public()`;
+  or a public Langfuse dashboard rather than per-trace links.

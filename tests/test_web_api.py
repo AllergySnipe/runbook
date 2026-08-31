@@ -90,6 +90,9 @@ def _wire(monkeypatch):
     monkeypatch.setattr(web_api, "record_run_start", lambda *a, **k: None)
     monkeypatch.setattr(web_api, "mark_run_failed", lambda *a, **k: None)
     monkeypatch.setattr(web_api, "list_runs", lambda **kw: [])
+    # default: no such persisted run (the "unknown id → 404" path). Tests that
+    # need a specific record override this with `fake_run`.
+    monkeypatch.setattr(web_api, "get_run", lambda rid: None)
     yield
     web_api._RUNS.clear()
 

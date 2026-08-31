@@ -3,8 +3,8 @@
 One **trace** per `diagnose()` run. `llm.py` imports its OpenAI client from
 `langfuse.openai`, so every model call is auto-captured as a *generation*; this
 module adds the root trace plus typed manual spans (`triage` / `retrieve` /
-`memory` / `tool-loop` / `synthesis` / `guardrail`) around the non-LLM work, so
-the trace tree matches how the loop actually runs.
+`retrieve-memory` / `tool-loop` / `synthesize` / `guardrail`) around the non-LLM
+work, so the trace tree matches how the loop actually runs.
 
 **Contract: a no-op unless configured.** `setup()` builds the client only when
 `langfuse_enabled` is set *and* both keys are present; otherwise `trace()` /
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -160,15 +160,13 @@ def trace(
     *,
     input: Any = None,
     metadata: dict | None = None,
-    tags: list[str] | None = None,
 ) -> Iterator[TraceHandle]:
     """Root trace for one operation. No-op (yields an inert handle) when tracing
-    is off. The root observation's name / input / output become the trace's."""
+    is off. The root observation's name / input / output become the trace's.
+    Per-run dimensions go in `metadata` (no trace tags)."""
     if _client is None:
         yield TraceHandle(_root=_NullSpan())
         return
-
-    from langfuse import propagate_attributes
 
     handle = TraceHandle()
     with _client.start_as_current_observation(as_type="span", name=name, input=input) as root:
@@ -180,9 +178,7 @@ def trace(
             handle.trace_url = _client.get_trace_url(trace_id=handle.trace_id)
         except Exception:
             log.debug("langfuse trace attribute set failed", exc_info=True)
-        prop = propagate_attributes(tags=tags) if tags else nullcontext()
-        with prop:
-            yield handle
+        yield handle
 
 
 @contextmanager

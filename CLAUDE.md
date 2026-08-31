@@ -58,10 +58,11 @@ is auto-traced as a *generation* (named by role via a `trace_name=` kwarg). `cor
 public `diagnose` opens the root trace and delegates to `_diagnose`, which carries typed child
 spans (`triage` / `retrieve` / `retrieve-memory` / `tool-loop` / `synthesize` / `guardrail`).
 S5: `Langfuse(mask=…, mask_otel_spans=…)` route every trace field through `redact.redact()` —
-backstopping `llm._redact_outgoing`. `incident_runs.langfuse_trace_id` + `_trace_url` link the
-audit row to the trace; the dashboard IncidentDetail shows a "trace ↗" link. Langfuse **Cloud
-hobby tier** (US region), `LANGFUSE_ENVIRONMENT` = development locally / production on Render.
-Prod-verified. **Online scoring is not built** (the `obs.score()` stub is the seam).
+backstopping `llm._redact_outgoing`. `incident_runs.langfuse_trace_id` + `_trace_url` store the
+link; `runbook run <id>` / `runbook diagnose` print the URL (no link from the no-auth web
+dashboard — public traces were tried and dropped, ADR-0017 §6). Langfuse **Cloud hobby tier**
+(US region), `LANGFUSE_ENVIRONMENT` = development locally / production on Render. Prod-verified.
+**Online scoring is not built** (the `obs.score()` stub is the seam).
 
 **Not built:** online scoring on sampled runs. Nothing executes on approval — no state-changing
 tools. `retrieve()` + tools + `cache.py` + `memory.py` are sync (blocking HTTP, only via
