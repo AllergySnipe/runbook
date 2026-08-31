@@ -8,7 +8,6 @@ registry, SSE replay + live streaming, and the approve/reject wiring.
 
 from __future__ import annotations
 
-import time
 from datetime import UTC, datetime
 
 import pytest
@@ -98,27 +97,18 @@ def _wire(monkeypatch):
     web_api._RUNS.clear()
 
 
-_SSE_TERMINAL = {ev.FINISHED, ev.ERROR}
+def _run_to_completion(scenario: str = "db-connection-pool-exhaustion", *, k: int = 4):
+    """Run one incident through `_run_incident` directly and register it in
+    `_RUNS` — deterministic, no TestClient/SSE transport in the loop. Returns the
+    finished `IncidentRun`; `run.events` is the full published sequence."""
+    import asyncio
 
-
-def _drain_sse(run_id: str) -> list[str]:
-    """Collect the SSE event names for a run. Reconnects until the last event is
-    terminal — under `TestClient` the stream can close early (a spurious
-    `is_disconnected()` on a slow runner) before the background task publishes
-    `finished`/`error`; reconnecting replays the full buffer once the run is done
-    (the route is explicitly reconnect-safe)."""
-    names: list[str] = []
-    for _ in range(100):
-        names = []
-        with client.stream("GET", f"/api/incidents/{run_id}/events") as r:
-            assert r.status_code == 200
-            for line in r.iter_lines():
-                if line.startswith("event:"):
-                    names.append(line.split(":", 1)[1].strip())
-        if names and names[-1] in _SSE_TERMINAL:
-            break
-        time.sleep(0.02)
-    return names
+    run = web_api.IncidentRun(
+        id="run_" + scenario[:6], alert="alert text", scenario=scenario, created_at=datetime.now(UTC)
+    )
+    web_api._RUNS[run.id] = run
+    asyncio.run(web_api._run_incident(run, k))
+    return run
 
 
 # --- tests ---------------------------------------------------------------
@@ -137,13 +127,20 @@ def test_start_unknown_scenario_404():
     assert resp.status_code == 404
 
 
-def test_sse_streams_the_scripted_events_then_finishes():
-    run_id = client.post(
-        "/api/incidents", json={"scenario": "db-connection-pool-exhaustion"}
-    ).json()["id"]
-    names = _drain_sse(run_id)
+def test_run_incident_publishes_the_scripted_events_then_finishes():
+    run = _run_to_completion()
+    names = [e["type"] for e in run.events]
     # every scripted event, in order, plus a terminal 'finished'
     assert names[: len(SCRIPT)] == [e["type"] for e in SCRIPT]
+    assert names[-1] == ev.FINISHED
+    assert run.done
+
+
+def test_sse_replays_a_finished_run_then_closes():
+    run = _run_to_completion()
+    with client.stream("GET", f"/api/incidents/{run.id}/events") as r:
+        assert r.status_code == 200
+        names = [ln.split(":", 1)[1].strip() for ln in r.iter_lines() if ln.startswith("event:")]
     assert names[-1] == ev.FINISHED
 
 
@@ -153,13 +150,9 @@ def test_sse_unknown_id_404():
 
 
 def test_get_incident_after_finish_returns_persisted_record(monkeypatch):
-    run_id = client.post(
-        "/api/incidents", json={"scenario": "db-connection-pool-exhaustion"}
-    ).json()["id"]
-    _drain_sse(run_id)  # let the background task finish + persist
-
+    run = _run_to_completion()
     monkeypatch.setattr(web_api, "get_run", fake_run)
-    resp = client.get(f"/api/incidents/{run_id}")
+    resp = client.get(f"/api/incidents/{run.id}")
     assert resp.status_code == 200
     assert resp.json()["status"] == "awaiting-approval"
 
@@ -175,12 +168,10 @@ def test_run_that_crashes_is_marked_failed_not_dropped(monkeypatch):
     monkeypatch.setattr(web_api, "diagnose", boom)
     monkeypatch.setattr(web_api, "mark_run_failed", lambda rid, err: marked.update(id=rid, err=err))
 
-    run_id = client.post(
-        "/api/incidents", json={"scenario": "db-connection-pool-exhaustion"}
-    ).json()["id"]
-    names = _drain_sse(run_id)
+    run = _run_to_completion()
+    names = [e["type"] for e in run.events]
     assert names[-1] == ev.ERROR
-    assert marked["id"] == run_id
+    assert marked["id"] == run.id
     assert "provider exploded" in marked["err"]
 
 
