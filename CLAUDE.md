@@ -74,10 +74,10 @@ Flywheel on-ramp: `runbook scores --low` flags tripped runs + prints the `outcom
 commands. **No LLM judge** (deferred — needs calibration) and **no dashboard panel** (ADR-0018
 §2, §7).
 
-**CI is green** (`b8460f8`, first green run in the repo — was red since commit #4): `config.py`
-`database_url` / `database_url_unpooled` now default to `""` so `get_settings()` works with no
-DB. Verify a checkpoint the CI way: `env DATABASE_URL= DATABASE_URL_UNPOOLED= uv run pytest -q`
-(integration suites must skip, not error) + `ruff check . && ruff format --check .` (whole repo).
+**CI is green** (`6aac190`; first green run was `b8460f8` — red since commit #4 before that):
+`config.py` `database_url` / `database_url_unpooled` default to `""` so `get_settings()` works
+with no DB. Verify a checkpoint the CI way: `env DATABASE_URL= DATABASE_URL_UNPOOLED= uv run
+pytest -q` (integration suites must skip, not error) + `ruff check . && ruff format --check .`.
 
 **Not built:** the reference-free plausibility judge (ADR-0018 "Revisit if"). Nothing executes
 on approval — no state-changing tools. `retrieve()` + tools + `cache.py` + `memory.py` +
@@ -129,7 +129,8 @@ Check before assuming a module exists.
 ## Layout
 
 ```
-docs/              SPEC, ADRs, backlog
+docs/              SPEC, ADRs, backlog; design/ (eval-report.md — the ship decision);
+                   security/ (log-injection.md — the security report)
 migrations/        plain .sql files, applied by `runbook migrate`
 corpus/synthetic/  hand-written paymentsvc runbooks (committed; part of the corpus)
 data/raw/          ingest cache — fetched tarballs + postmortem text (gitignored)

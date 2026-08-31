@@ -135,11 +135,14 @@ export default function Evals() {
         </>
       )}
 
-      <p className="text-xs text-[var(--color-ink-faint)]">
-        <Link to="/how-it-works" className="text-[var(--color-accent)] hover:underline">
+      <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
+        <Link to="/eval-report" className="text-[var(--color-accent)] hover:underline">
+          Is this good enough for on-call? →
+        </Link>
+        <Link to="/how-it-works" className="text-[var(--color-ink-faint)] hover:underline">
           ← How the loop works
         </Link>
-      </p>
+      </div>
     </div>
   );
 }

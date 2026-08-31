@@ -114,6 +114,8 @@ The synthetic runbooks and the sim center on **`paymentsvc`**, a payments API:
   residual: alert-annotation → triage suppression, poisoned-doc exfiltration. See
   `docs/security/log-injection.md`.
 - **Regression** — no eval metric drops between commits without a written justification.
+- **The ship decision** — whether these numbers are good enough to put in front of on-call, and
+  what they don't cover, is argued in `docs/design/eval-report.md` (also the `/eval-report` page).
 - **Online scoring (ADR-0018)** — a sampled fraction of real runs is auto-graded by
   reference-free scorers (no label): `safety-invariants` (S1–S3 re-checked live — must stay
   1.0), `grounding-coverage`, `retrieval-confidence`, `disposition`. Scores land on the run's

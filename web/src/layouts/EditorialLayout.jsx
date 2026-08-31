@@ -7,6 +7,7 @@ const links = [
   { to: "/", label: "Overview", end: true },
   { to: "/how-it-works", label: "How it works" },
   { to: "/decisions", label: "Decisions" },
+  { to: "/eval-report", label: "Eval report" },
 ];
 
 export default function EditorialLayout() {

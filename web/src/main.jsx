@@ -7,6 +7,7 @@ import ToolLayout from "./layouts/ToolLayout.jsx";
 import Overview from "./routes/Overview.jsx";
 import HowItWorks from "./routes/HowItWorks.jsx";
 import Decisions from "./routes/Decisions.jsx";
+import EvalReport from "./routes/EvalReport.jsx";
 import IncidentList from "./routes/IncidentList.jsx";
 import IncidentDetail from "./routes/IncidentDetail.jsx";
 import Evals from "./routes/Evals.jsx";
@@ -19,6 +20,7 @@ const router = createBrowserRouter([
       { path: "/", element: <Overview /> },
       { path: "/how-it-works", element: <HowItWorks /> },
       { path: "/decisions", element: <Decisions /> },
+      { path: "/eval-report", element: <EvalReport /> },
     ],
   },
   {

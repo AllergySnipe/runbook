@@ -6,6 +6,7 @@ grounded diagnosis — pausing for human approval before any state-changing acti
 
 - Design & scope: [`docs/SPEC.md`](docs/SPEC.md)
 - Decisions: [`docs/adr/`](docs/adr/)
+- Is it good enough for on-call? [`docs/design/eval-report.md`](docs/design/eval-report.md)
 
 **Live:** https://runbook-cgkn.onrender.com (`/health`, `/docs`) — may cold-start after idle.
 
